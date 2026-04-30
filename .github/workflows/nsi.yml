@@ -115,5 +115,13 @@ jobs:
           echo "include ':app'" > settings.gradle
           # (Lanjutin build.gradle & setup java/android di bawah...)
       
-      - name: Build and Upload
-        # [Step build & upload sama persis kayak versi sebelumnya]
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NSI-v4.1-debug
+          path: app/build/outputs/apk/debug/*.apk
