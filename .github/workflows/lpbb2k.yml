@@ -1,4 +1,4 @@
-name: Build APK - LongPressKill Fix Final
+name: Build APK - Fix Missing Wrapper
 
 on:
   workflow_dispatch:
@@ -15,16 +15,16 @@ jobs:
           mkdir -p app/src/main/res/values
           mkdir -p gradle/wrapper
           
-          # 1. Buat strings.xml dulu biar aman pas dilink
+          # Strings resource
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">Long Press Kill</string>
-              <string name="accessibility_desc">Tekan lama tombol BACK (0.6 detik) untuk mematikan aplikasi yang sedang dibuka (Butuh Root).</string>
+              <string name="accessibility_desc">Tekan lama tombol BACK (0.6 detik) untuk force kill aplikasi (Root).</string>
           </resources>
           EOF
           
-          # 2. Manifest menggunakan tema standar device
+          # Manifest
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -58,7 +58,7 @@ jobs:
           </manifest>
           EOF
           
-          # 3. MainActivity menggunakan Activity standar (no-appcompat)
+          # MainActivity
           cat > app/src/main/java/com/freestyle/longpresskill/MainActivity.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.os.Bundle
@@ -78,12 +78,12 @@ jobs:
                       setPadding(50, 50, 50, 50)
                   }
                   statusText = TextView(this).apply {
-                      text = "Long Press Kill Service\nStatus: Checking..."
+                      text = "Service Status: Checking..."
                       textSize = 18f
                       setPadding(0, 0, 0, 50)
                   }
                   val enableButton = Button(this).apply {
-                      text = "Enable Accessibility Service"
+                      text = "Buka Setting Accessibility"
                       setOnClickListener {
                           startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                       }
@@ -95,19 +95,17 @@ jobs:
               override fun onResume() {
                   super.onResume()
                   val isEnabled = isAccessibilityServiceEnabled()
-                  statusText.text = "Long Press Kill Service\nStatus: ${if (isEnabled) "ACTIVE ✅" else "INACTIVE ❌"}\n\nTekan lama tombol BACK selama 0.6 detik untuk kill aplikasi."
+                  statusText.text = "Service Status: ${if (isEnabled) "AKTIF ✅" else "MATI ❌"}\n\nTekan lama BACK (0.6s) untuk kill app."
               }
               private fun isAccessibilityServiceEnabled(): Boolean {
                   val service = "${packageName}/${LongPressKillService::class.java.name}"
-                  return try {
-                      val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-                      enabledServices?.contains(service) == true
-                  } catch(e: Exception) { false }
+                  val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                  return enabledServices?.contains(service) == true
               }
           }
           EOF
           
-          # 4. Service logic dengan deteksi Long Press
+          # Service Logic
           cat > app/src/main/java/com/freestyle/longpresskill/LongPressKillService.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.accessibilityservice.AccessibilityService
@@ -116,12 +114,11 @@ jobs:
           import android.os.Handler
           import android.os.Looper
           import android.view.KeyEvent
-          import android.util.Log
           
           class LongPressKillService : AccessibilityService() {
               private var backPressStartTime = 0L
               private val handler = Handler(Looper.getMainLooper())
-              private val LONG_PRESS_DELAY_MS = 600L
+              private val DELAY = 600L
               
               override fun onKeyEvent(event: KeyEvent?): Boolean {
                   if (event?.keyCode == KeyEvent.KEYCODE_BACK) {
@@ -130,11 +127,8 @@ jobs:
                               if (backPressStartTime == 0L) {
                                   backPressStartTime = System.currentTimeMillis()
                                   handler.postDelayed({
-                                      if (backPressStartTime != 0L) {
-                                          killForegroundApp()
-                                          backPressStartTime = 0L
-                                      }
-                                  }, LONG_PRESS_DELAY_MS)
+                                      if (backPressStartTime != 0L) killForegroundApp()
+                                  }, DELAY)
                               }
                           }
                           KeyEvent.ACTION_UP -> {
@@ -147,44 +141,35 @@ jobs:
               }
               
               private fun killForegroundApp() {
-                  try {
-                      val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                      val currentApp = am.runningAppProcesses?.firstOrNull { 
-                          it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND 
+                  val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                  val currentApp = am.runningAppProcesses?.firstOrNull { 
+                      it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND 
+                  }
+                  currentApp?.let {
+                      if (it.processName != packageName) {
+                          Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop ${it.processName}"))
                       }
-                      currentApp?.let {
-                          if (it.processName != packageName) {
-                              Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop ${it.processName}"))
-                          }
-                      }
-                  } catch(e: Exception) {
-                      Log.e("LPK", "Gagal kill app: ${e.message}")
                   }
               }
               override fun onInterrupt() {}
           }
           EOF
           
-          # 5. Config Accessibility (WAJIB ada flagRequestFilterKeyEvents)
+          # XML Config
           cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
               android:accessibilityEventTypes="typeAllMask"
               android:accessibilityFeedbackType="feedbackGeneric"
               android:accessibilityFlags="flagReportViewIds|flagRequestFilterKeyEvents"
-              android:canPerformGestures="true"
-              android:canRetrieveWindowContent="true"
               android:canRequestFilterKeyEvents="true"
               android:description="@string/accessibility_desc"
               android:notificationTimeout="100" />
           EOF
 
-          # 6. Build Gradle (minimalis & stabil)
+          # Build files
           cat > app/build.gradle << 'EOF'
-          plugins {
-              id 'com.android.application'
-              id 'kotlin-android'
-          }
+          plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
               namespace 'com.freestyle.longpresskill'
               compileSdk 34
@@ -195,15 +180,8 @@ jobs:
                   versionCode 1
                   versionName "1.0"
               }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-              kotlinOptions { jvmTarget = '17' }
           }
-          dependencies {
-              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-          }
+          dependencies { implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0" }
           EOF
 
           cat > build.gradle << 'EOF'
@@ -223,15 +201,8 @@ jobs:
           EOF
           
           cat > gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx2048m
           android.useAndroidX=true
           EOF
-
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.1-bin.zip
-          EOF
-          
-          echo "✅ Project files ready"
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -242,15 +213,19 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build APK
+      - name: Setup Gradle Wrapper (Fix ClassNotFound)
         run: |
-          # Gunakan gradlew bawaan runner atau download jika perlu
+          # Download gradlew dan jar-nya secara manual ke folder yang bener
           wget -q https://raw.githubusercontent.com/gradle/gradle/v8.1.0/gradlew -O gradlew
+          mkdir -p gradle/wrapper
+          wget -q https://raw.githubusercontent.com/gradle/gradle/v8.1.0/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+
+      - name: Build APK
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LongPressKill-Fix-Final
+          name: LongPressKill-Fixed
           path: app/build/outputs/apk/debug/*.apk
