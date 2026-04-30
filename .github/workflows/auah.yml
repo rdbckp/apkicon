@@ -1,4 +1,4 @@
-name: Build with Gradle 8.2 (Stable)
+name: Build APK - Native SDK
 
 on:
   workflow_dispatch:
@@ -170,12 +170,12 @@ jobs:
           
           android {
               namespace 'com.freestyle.longpresskill'
-              compileSdk 34
+              compileSdk 33
               
               defaultConfig {
                   applicationId "com.freestyle.longpresskill"
                   minSdk 29
-                  targetSdk 34
+                  targetSdk 33
                   versionCode 1
                   versionName "1.0"
               }
@@ -191,7 +191,7 @@ jobs:
           }
           
           dependencies {
-              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.core:core-ktx:1.9.0'
               implementation 'androidx.appcompat:appcompat:1.6.1'
           }
           EOF
@@ -253,15 +253,33 @@ jobs:
           
           echo "✅ Project created"
           
-      - name: Setup JDK 11 (kompatibel dengan Gradle 7.5)
+      - name: Setup JDK 11
         uses: actions/setup-java@v4
         with:
           java-version: 11
           distribution: 'temurin'
           
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
+      - name: Install Android SDK components manually
+        run: |
+          # Download cmdline-tools langsung dari Google
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          
+          # Accept licenses
+          yes | sdkmanager --licenses > /dev/null 2>&1
+          
+          # Install required SDK components
+          sdkmanager "platforms;android-33" "build-tools;33.0.2" "platform-tools" --verbose
+          
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/build-tools/33.0.2" >> $GITHUB_PATH
+          
       - name: Download gradle wrapper
         run: |
           wget -q https://raw.githubusercontent.com/gradle/gradle/v7.5.0/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
@@ -272,10 +290,12 @@ jobs:
           chmod +x gradlew
           
       - name: Build APK
-        run: ./gradlew assembleDebug --no-daemon
-        
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LongPressKill-Fix
+          name: LongPressKill-A02
           path: app/build/outputs/apk/debug/*.apk
