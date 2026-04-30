@@ -253,35 +253,29 @@ jobs:
           
           echo "✅ Project created"
 
-      - name: Setup JDK 11
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: 11
+          java-version: 17
           distribution: 'temurin'
 
       - name: Install Android SDK
         run: |
-          # Set ANDROID_HOME dulu di awal biar semua perintah dibawah kebaca
           export ANDROID_HOME=$HOME/android-sdk
           mkdir -p $ANDROID_HOME/cmdline-tools
 
-          # Download & extract cmdline-tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q commandlinetools-linux-11076708_latest.zip
           mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
 
-          # Langsung export PATH di blok yang sama biar sdkmanager kebaca
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
 
-          # Accept licenses manual tanpa pake 'yes'
           mkdir -p $ANDROID_HOME/licenses
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
           echo "84831b9409646a918e30573bab4c9c91346d8abd" > $ANDROID_HOME/licenses/android-sdk-preview-license
 
-          # Install SDK
           sdkmanager "platforms;android-33" "build-tools;33.0.2"
 
-          # Simpan env buat step berikutnya
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
@@ -298,6 +292,7 @@ jobs:
       - name: Build APK
         run: |
           export ANDROID_HOME=$HOME/android-sdk
+          export JAVA_HOME=$JAVA_HOME_17_X64
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
