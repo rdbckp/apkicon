@@ -1,4 +1,4 @@
-name: Build APK - Network Indicator (Direct Service Start)
+name: Build APK - LongPress Back Kill (Reliable)
 
 on:
   workflow_dispatch:
@@ -7,201 +7,92 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Create Project Structure & Code
+      - name: Create Project
         run: |
-          mkdir -p app/src/main/java/com/network/speed
+          mkdir -p app/src/main/java/com/freestyle/longpresskill
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
 
           cat > app/src/main/res/values/strings.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="app_name">NetSpeed</string>
-              <string name="notification_title">NetSpeed Active</string>
-              <string name="notification_text">Service is running</string>
+              <string name="app_name">LongPress Kill</string>
+              <string name="service_label">LongPress Back Kill</string>
+              <string name="service_desc">Kill foreground app when back button is long pressed</string>
           </resources>
           EOF
 
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-              <application
-                  android:allowBackup="true"
-                  android:icon="@android:drawable/stat_sys_download"
-                  android:label="@string/app_name"
-                  android:theme="@android:style/Theme.NoDisplay">
-                  
-                  <service
-                      android:name=".OverlayService"
-                      android:exported="true"
-                      android:foregroundServiceType="dataSync" />
+              <application android:label="@string/app_name" android:icon="@android:drawable/ic_menu_delete">
+                  <service android:name=".KillService"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
+                  </service>
               </application>
           </manifest>
           EOF
 
-          cat > app/src/main/java/com/network/speed/OverlayService.kt << 'EOF'
-          package com.network.speed
+          cat > app/src/main/java/com/freestyle/longpresskill/KillService.kt << 'EOF'
+          package com.freestyle.longpresskill
 
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.PendingIntent
-          import android.app.Service
-          import android.content.Intent
-          import android.graphics.Color
-          import android.graphics.PixelFormat
-          import android.net.TrafficStats
-          import android.os.Build
-          import android.os.Handler
-          import android.os.IBinder
-          import android.os.Looper
-          import android.provider.Settings
-          import android.util.Log
-          import android.view.Gravity
-          import android.view.WindowManager
-          import android.widget.TextView
-          import androidx.core.app.NotificationCompat
-          import java.util.Locale
+          import android.accessibilityservice.AccessibilityService
+          import android.accessibilityservice.AccessibilityServiceInfo
+          import android.app.ActivityManager
+          import android.content.Context
+          import android.view.KeyEvent
+          import android.view.accessibility.AccessibilityEvent
 
-          class OverlayService : Service() {
-              private lateinit var windowManager: WindowManager
-              private var overlayView: TextView? = null
-              private val handler = Handler(Looper.getMainLooper())
-              private var isActive = false
-              private var lastRxBytes = 0L
-              private var lastUpdateTime = 0L
-              private val TAG = "OverlayService"
-
-              companion object {
-                  var isRunning = false
+          class KillService : AccessibilityService() {
+              override fun onServiceConnected() {
+                  info = AccessibilityServiceInfo().apply {
+                      eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                      feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                      flags = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+                      notificationTimeout = 100
+                  }
+                  setServiceInfo(info)
               }
 
-              override fun onCreate() {
-                  super.onCreate()
-                  Log.d(TAG, "onCreate called")
-
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                      Log.e(TAG, "No overlay permission. Requesting...")
-                      // Coba minta izin via intent (meski di priv-app mungkin sudah diizinkan)
-                      val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                          android.net.Uri.parse("package:$packageName"))
-                      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                      startActivity(intent)
-                      stopSelf()
-                      return
+              override fun onKeyEvent(event: KeyEvent): Boolean {
+                  if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN && event.isLongPress()) {
+                      killForegroundApp()
+                      return true
                   }
-
-                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-                  createOverlayView()
-                  startForegroundNotification()
-                  isActive = true
-                  isRunning = true
-                  lastRxBytes = TrafficStats.getTotalRxBytes()
-                  lastUpdateTime = System.currentTimeMillis()
-                  startUpdater()
-                  Log.d(TAG, "Service started successfully")
+                  return super.onKeyEvent(event)
               }
 
-              private fun createOverlayView() {
-                  val tv = TextView(this).apply {
-                      text = "▼ 0 KB/s"
-                      setTextColor(Color.BLACK)
-                      setBackgroundColor(Color.parseColor("#AAFFFFFF"))
-                      setPadding(8, 2, 8, 2)
-                      textSize = 11f
-                  }
-                  overlayView = tv
-
-                  val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-                  else
-                      WindowManager.LayoutParams.TYPE_PHONE
-
-                  val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      type,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                      PixelFormat.TRANSLUCENT
-                  ).apply {
-                      gravity = Gravity.TOP or Gravity.END
-                      x = 0
-                      y = 0
-                  }
-
-                  try {
-                      windowManager.addView(tv, params)
-                      Log.d(TAG, "Overlay view added at x=0, y=0, gravity=TOP|END")
-                  } catch (e: Exception) {
-                      Log.e(TAG, "Failed to add overlay", e)
+              private fun killForegroundApp() {
+                  val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                  val runningTasks = am.getRunningTasks(1)
+                  val pkg = runningTasks.firstOrNull()?.topActivity?.packageName
+                  if (pkg != null && pkg != packageName) {
+                      android.os.Process.killProcess(am.runningAppProcesses?.find { it.processName == pkg }?.pid ?: -1)
+                      // Force stop via shell jika perlu
+                      Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop $pkg"))
                   }
               }
 
-              private fun startForegroundNotification() {
-                  val channelId = "net_speed"
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(channelId, "Network Speed", NotificationManager.IMPORTANCE_LOW)
-                      getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-                  }
-
-                  val notification = NotificationCompat.Builder(this, channelId)
-                      .setContentTitle(getString(R.string.notification_title))
-                      .setContentText(getString(R.string.notification_text))
-                      .setSmallIcon(android.R.drawable.stat_sys_download)
-                      .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .setOngoing(true)
-                      .build()
-
-                  startForeground(1, notification)
-              }
-
-              private fun startUpdater() {
-                  val runnable = object : Runnable {
-                      override fun run() {
-                          if (!isActive) return
-                          updateSpeed()
-                          handler.postDelayed(this, 1000)
-                      }
-                  }
-                  handler.post(runnable)
-              }
-
-              private fun updateSpeed() {
-                  val now = System.currentTimeMillis()
-                  val currentRx = TrafficStats.getTotalRxBytes()
-
-                  if (lastRxBytes > 0 && lastUpdateTime > 0) {
-                      val deltaRx = currentRx - lastRxBytes
-                      val deltaTime = (now - lastUpdateTime) / 1000.0
-                      if (deltaTime > 0) {
-                          val downSpeed = deltaRx / deltaTime
-                          val speedText = when {
-                              downSpeed >= 1024 * 1024 -> String.format(Locale.US, "▼ %.1f MB/s", downSpeed / (1024 * 1024))
-                              downSpeed >= 1024 -> String.format(Locale.US, "▼ %.0f KB/s", downSpeed / 1024)
-                              else -> String.format(Locale.US, "▼ %.0f B/s", downSpeed)
-                          }
-                          overlayView?.text = speedText
-                      }
-                  }
-
-                  lastRxBytes = currentRx
-                  lastUpdateTime = now
-              }
-
-              override fun onDestroy() {
-                  super.onDestroy()
-                  Log.d(TAG, "onDestroy")
-                  isActive = false
-                  isRunning = false
-                  handler.removeCallbacksAndMessages(null)
-                  overlayView?.let { windowManager.removeView(it) }
-              }
-
-              override fun onBind(intent: Intent?): IBinder? = null
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+              override fun onInterrupt() {}
           }
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_config.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagRequestFilterKeyEvents"
+              android:canPerformGestures="false"
+              android:canRetrieveWindowContent="false"
+              android:description="@string/service_desc"
+              android:notificationTimeout="100" />
           EOF
 
           cat > build.gradle << 'EOF'
@@ -218,10 +109,10 @@ jobs:
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
-              namespace 'com.network.speed'
+              namespace 'com.freestyle.longpresskill'
               compileSdk 34
               defaultConfig {
-                  applicationId "com.network.speed"
+                  applicationId "com.freestyle.longpresskill"
                   minSdk 21
                   targetSdk 34
                   versionCode 1
@@ -269,5 +160,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NetSpeed-Direct
+          name: LongPressKill-Reliable
           path: app/build/outputs/apk/debug/*.apk
