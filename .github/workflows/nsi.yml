@@ -1,4 +1,4 @@
-name: Build APK - NSI v4.2 - Stable Big Font
+name: Build APK - NSI v4.2 - Final Stable Font
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
           <resources>
               <string name="app_name">NSI v4.2</string>
               <string name="notif_channel">Network Speed</string>
-              <string name="notif_title">Network Speed Indicator</string>
+              <string name="notif_title">Speed Indicator</string>
           </resources>
           EOF
 
@@ -105,12 +105,12 @@ jobs:
                   }
 
                   val startBtn = Button(this).apply {
-                      text = "Mulai Service"
+                      text = "START SERVICE"
                       setOnClickListener { startSpeedService(); updateStatus() }
                   }
 
                   val stopBtn = Button(this).apply {
-                      text = "Hentikan Service"
+                      text = "STOP SERVICE"
                       setOnClickListener {
                           stopService(Intent(this@MainActivity, SpeedService::class.java))
                           updateStatus()
@@ -139,9 +139,9 @@ jobs:
 
               private fun updateStatus() {
                   statusText.text = if (SpeedService.isRunning)
-                      "Status: AKTIF ✅\n\nIndikator kecepatan besar (setara jam SB) aktif."
+                      "Status: ONLINE ✅\n\nIndikator font besar aktif."
                   else
-                      "Status: MATI ❌"
+                      "Status: OFFLINE ❌"
               }
           }
           EOF
@@ -167,7 +167,7 @@ jobs:
           }
           EOF
 
-          # 6. SpeedService.kt - STABLE BIG FONT logic
+          # 6. SpeedService.kt - LOGIKA STABLE FONT
           cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -188,7 +188,6 @@ jobs:
 
               private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                   color = Color.WHITE
-                  // Pakai SANS_SERIF BOLD supaya mirip font jam sistem
                   typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                   textAlign = Paint.Align.CENTER
               }
@@ -198,7 +197,7 @@ jobs:
                       private set
                   const val NOTIF_ID = 1
                   const val CHANNEL_ID = "nsi_speed_v4"
-                  const val ICON_SIZE = 96 // Resolusi tinggi untuk status bar
+                  const val ICON_SIZE = 96
               }
 
               override fun onCreate() {
@@ -235,25 +234,18 @@ jobs:
                   lastTime = now
               }
 
-              /**
-               * STABLE BIG FONT generator.
-               * Tinggi huruf dipaksa setara dengan jam sistem (sekitar 70% canvas).
-               * Tidak ada auto-scaling horizontal agar tinggi tetap konsisten.
-               */
               private fun makeIcon(label: String): Icon {
                   val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
                   
-                  // TextSize di-set fix supaya tingginya setara tinggi jam (stabil)
-                  // 0.7f (70% dari 96px = ~67px) adalah standar yang pas buat font besar di SB
+                  // TextSize fix (72% dari canvas) biar setara tinggi jam
                   paint.textSize = ICON_SIZE * 0.72f 
 
-                  // Hitung posisi Y supaya benar-benar Center secara visual (Baseline correction)
                   val xPos = ICON_SIZE / 2f
+                  // Formula visual centering pakai Font Metrics
                   val yPos = (ICON_SIZE / 2f) - ((paint.descent() + paint.ascent()) / 2f)
 
                   canvas.drawText(label, xPos, yPos, paint)
-
                   return Icon.createWithBitmap(bmp)
               }
 
@@ -271,7 +263,7 @@ jobs:
                   )
                   return Notification.Builder(this, CHANNEL_ID)
                       .setSmallIcon(icon)
-                      .setContentTitle("Speed")
+                      .setContentTitle("Network Speed")
                       .setContentIntent(pi)
                       .setOngoing(true)
                       .setOnlyAlertOnce(true)
@@ -306,7 +298,7 @@ jobs:
           }
           EOF
 
-          # 7. build.gradle root
+          # 6. root build.gradle
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -318,7 +310,7 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # 8. app/build.gradle
+          # 7. app/build.gradle
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -328,7 +320,7 @@ jobs:
                   applicationId "com.freestyle.networkindicator"
                   minSdk 23
                   targetSdk 34
-                  versionCode 6
+                  versionCode 7
                   versionName "4.2"
               }
               compileOptions {
@@ -351,16 +343,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build APK
+      - name: Build APK with Gradle
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NSI-v4.2-StableBigFont
+          name: NSI-v4.2-Fixed
           path: app/build/outputs/apk/debug/*.apk
