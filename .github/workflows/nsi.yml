@@ -1,4 +1,4 @@
-name: Build APK - LongPress Back Kill (Reliable)
+name: Build APK - LongPress Back Kill (Reliable - Fixed)
 
 on:
   workflow_dispatch:
@@ -45,18 +45,21 @@ jobs:
           import android.accessibilityservice.AccessibilityServiceInfo
           import android.app.ActivityManager
           import android.content.Context
+          import android.os.Build
           import android.view.KeyEvent
           import android.view.accessibility.AccessibilityEvent
 
           class KillService : AccessibilityService() {
+
               override fun onServiceConnected() {
-                  info = AccessibilityServiceInfo().apply {
+                  // Configure the accessibility service
+                  val config = AccessibilityServiceInfo().apply {
                       eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                       feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
                       flags = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
                       notificationTimeout = 100
                   }
-                  setServiceInfo(info)
+                  setServiceInfo(config)
               }
 
               override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -68,13 +71,18 @@ jobs:
               }
 
               private fun killForegroundApp() {
-                  val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                  val runningTasks = am.getRunningTasks(1)
-                  val pkg = runningTasks.firstOrNull()?.topActivity?.packageName
-                  if (pkg != null && pkg != packageName) {
-                      android.os.Process.killProcess(am.runningAppProcesses?.find { it.processName == pkg }?.pid ?: -1)
-                      // Force stop via shell jika perlu
-                      Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop $pkg"))
+                  try {
+                      val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                          val runningTasks = am.getRunningTasks(1)
+                          val pkg = runningTasks.firstOrNull()?.topActivity?.packageName
+                          if (pkg != null && pkg != packageName) {
+                              // Force stop via shell
+                              Runtime.getRuntime().exec(arrayOf("su", "-c", "am force-stop $pkg"))
+                          }
+                      }
+                  } catch (e: Exception) {
+                      e.printStackTrace()
                   }
               }
 
@@ -160,5 +168,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LongPressKill-Reliable
+          name: LongPressKill-Fixed
           path: app/build/outputs/apk/debug/*.apk
