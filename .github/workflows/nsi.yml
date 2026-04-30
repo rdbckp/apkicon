@@ -1,4 +1,4 @@
-name: Build APK - NSI v2 - Status Bar Indicator
+name: Build APK - NSI v3 - Status Bar Area (Precise)
 
 on:
   workflow_dispatch:
@@ -19,10 +19,8 @@ jobs:
               <string name="app_name">Network Indicator</string>
               <string name="start_service">Mulai</string>
               <string name="stop_service">Hentikan</string>
-              <string name="service_running">AKTIF</string>
-              <string name="service_stopped">MATI</string>
-              <string name="notification_title">Network Indicator Aktif</string>
-              <string name="notification_text">Download speed di status bar</string>
+              <string name="notification_title">Network Indicator</string>
+              <string name="notification_text">Download speed aktif</string>
           </resources>
           EOF
 
@@ -33,12 +31,12 @@ jobs:
               xmlns:tools="http://schemas.android.com/tools">
 
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-              <uses-permission android:name="android.permission.STATUS_BAR" />
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
               <application
                   android:allowBackup="true"
@@ -60,6 +58,16 @@ jobs:
                       android:name=".OverlayService"
                       android:exported="false"
                       android:foregroundServiceType="dataSync" />
+
+                  <!-- Auto-start on boot -->
+                  <receiver
+                      android:name=".BootReceiver"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
               </application>
           </manifest>
           EOF
@@ -70,10 +78,14 @@ jobs:
 
           import android.app.Activity
           import android.content.Intent
+          import android.os.Build
           import android.os.Bundle
+          import android.provider.Settings
+          import android.net.Uri
           import android.widget.Button
           import android.widget.LinearLayout
           import android.widget.TextView
+          import android.widget.Toast
 
           class MainActivity : Activity() {
               private lateinit var statusText: TextView
@@ -89,13 +101,27 @@ jobs:
                   }
 
                   statusText = TextView(this).apply {
-                      textSize = 18f
+                      textSize = 16f
                       setPadding(0, 0, 0, 40)
+                  }
+
+                  val permButton = Button(this).apply {
+                      text = "Izin Overlay"
+                      setOnClickListener {
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                              startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                  Uri.parse("package:$packageName")))
+                          }
+                      }
                   }
 
                   startButton = Button(this).apply {
                       text = getString(R.string.start_service)
                       setOnClickListener {
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this@MainActivity)) {
+                              Toast.makeText(this@MainActivity, "Kasih izin overlay dulu!", Toast.LENGTH_SHORT).show()
+                              return@setOnClickListener
+                          }
                           startService(Intent(this@MainActivity, OverlayService::class.java))
                           updateStatus()
                       }
@@ -110,6 +136,7 @@ jobs:
                   }
 
                   layout.addView(statusText)
+                  layout.addView(permButton)
                   layout.addView(startButton)
                   layout.addView(stopButton)
                   setContentView(layout)
@@ -122,14 +149,48 @@ jobs:
 
               private fun updateStatus() {
                   val running = OverlayService.isRunning
-                  statusText.text = "Status: ${if (running) getString(R.string.service_running) + " ✅" else getString(R.string.service_stopped) + " ❌"}\n\nDownload speed tampil di status bar."
+                  val hasPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                      Settings.canDrawOverlays(this) else true
+                  statusText.text = "Status: ${if (running) "AKTIF ✅" else "MATI ❌"}\n" +
+                      "Overlay izin: ${if (hasPerm) "✅" else "❌ (tap Izin Overlay)"}\n\n" +
+                      "App auto-start saat boot."
                   startButton.isEnabled = !running
                   stopButton.isEnabled = running
               }
           }
           EOF
 
-          # 4. OverlayService.kt - TYPE_STATUS_BAR_ADDITIONAL (2009), download only
+          # 4. BootReceiver.kt
+          cat > app/src/main/java/com/freestyle/networkindicator/BootReceiver.kt << 'EOF'
+          package com.freestyle.networkindicator
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent) {
+                  if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+                      intent.action == "android.intent.action.LOCKED_BOOT_COMPLETED") {
+                      val serviceIntent = Intent(context, OverlayService::class.java)
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          context.startForegroundService(serviceIntent)
+                      } else {
+                          context.startService(serviceIntent)
+                      }
+                  }
+              }
+          }
+          EOF
+
+          # 5. OverlayService.kt
+          # Data presisi dari A02:
+          #   StatusBar height = 45px (dari dumpsys window)
+          #   Density = 300dpi → 1dp = 1.875px
+          #   Layar = 720x1600px
+          #   Strategi: y = -45 + FLAG_LAYOUT_NO_LIMITS → masuk area SB
+          #   x = 150px dari kanan → kiri dari area clock/battery Samsung
           cat > app/src/main/java/com/freestyle/networkindicator/OverlayService.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -165,10 +226,12 @@ jobs:
                   var isRunning = false
                       private set
 
-                  // TYPE_STATUS_BAR_ADDITIONAL = 2009
-                  // Nilai int internal AOSP, tidak exposed di public SDK
-                  // Butuh android.permission.STATUS_BAR (privileged) untuk digunakan
-                  const val TYPE_STATUS_BAR_ADDITIONAL = 2009
+                  // A02 data: SB height = 45px, density = 300dpi
+                  const val SB_HEIGHT_PX = 45
+                  // Offset dari kanan: area clock+battery+wifi Samsung A02
+                  // Clock Samsung ~72px, battery ~30px, wifi+signal ~48px = ~150px total
+                  // Tambah sedikit padding → 160px
+                  const val OFFSET_FROM_RIGHT_PX = 160
               }
 
               override fun onCreate() {
@@ -188,37 +251,30 @@ jobs:
                       text = "0K"
                       setTextColor(Color.WHITE)
                       setBackgroundColor(Color.TRANSPARENT)
-                      setPadding(0, 0, 6, 0)
+                      setPadding(0, 0, 4, 0)
+                      // 11sp → 11 * (300/160) = ~20.6px — setara font angka baterai Samsung
                       textSize = 11f
                       typeface = Typeface.create("sans-serif-condensed", Typeface.NORMAL)
                   }
 
-                  // Pakai TYPE_STATUS_BAR_ADDITIONAL supaya masuk area status bar
-                  // Fallback ke TYPE_APPLICATION_OVERLAY kalau SDK < O
-                  val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      TYPE_STATUS_BAR_ADDITIONAL
-                  } else {
-                      @Suppress("DEPRECATION")
-                      WindowManager.LayoutParams.TYPE_PHONE
-                  }
-
                   val params = WindowManager.LayoutParams(
                       WindowManager.LayoutParams.WRAP_CONTENT,
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      windowType,
+                      SB_HEIGHT_PX,  // tinggi pas setinggi SB
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      else
+                          @Suppress("DEPRECATION")
+                          WindowManager.LayoutParams.TYPE_PHONE,
                       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                               WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                              WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                              WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                       PixelFormat.TRANSLUCENT
                   ).apply {
                       gravity = Gravity.END or Gravity.TOP
-                      // x = offset dari kanan layar (pixel)
-                      // Area kanan status bar Samsung A02: signal+wifi+battery+clock ~280px
-                      // Teks kita nempel di kiri icon wifi, jadi offset ~180px dari kanan
-                      // Kalau kurang pas, tinggal adjust nilai ini via rebuild
-                      x = 180
-                      y = 0
+                      x = OFFSET_FROM_RIGHT_PX
+                      // y = -SB_HEIGHT_PX → masuk area SB karena FLAG_LAYOUT_NO_LIMITS
+                      y = -SB_HEIGHT_PX
                   }
 
                   windowManager.addView(overlayView, params)
@@ -232,21 +288,17 @@ jobs:
                       )
                       getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
                   }
-
                   val pi = PendingIntent.getActivity(
                       this, 0, Intent(this, MainActivity::class.java),
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                   )
-
-                  val notif = NotificationCompat.Builder(this, channelId)
+                  startForeground(1, NotificationCompat.Builder(this, channelId)
                       .setContentTitle(getString(R.string.notification_title))
                       .setContentText(getString(R.string.notification_text))
                       .setSmallIcon(android.R.drawable.ic_menu_manage)
                       .setContentIntent(pi)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .build()
-
-                  startForeground(1, notif)
+                      .build())
               }
 
               private fun startUpdater() {
@@ -264,17 +316,15 @@ jobs:
                   val now = System.currentTimeMillis()
                   val currentRx = TrafficStats.getTotalRxBytes()
                   val deltaTime = (now - lastUpdateTime) / 1000.0
-
                   if (lastRxBytes > 0 && deltaTime > 0) {
-                      val downSpeed = (currentRx - lastRxBytes) / deltaTime
-                      overlayView.text = formatSpeed(downSpeed)
+                      val bps = (currentRx - lastRxBytes) / deltaTime
+                      overlayView.text = formatSpeed(bps)
                   }
-
                   lastRxBytes = currentRx
                   lastUpdateTime = now
               }
 
-              // Format singkat biar muat di status bar: "123K", "1.2M", "45B"
+              // Format singkat biar muat: "123K", "1.2M", "45B"
               private fun formatSpeed(bps: Double): String = when {
                   bps >= 1024 * 1024 -> String.format(Locale.US, "%.1fM", bps / (1024 * 1024))
                   bps >= 1024        -> String.format(Locale.US, "%.0fK", bps / 1024)
@@ -295,7 +345,7 @@ jobs:
           }
           EOF
 
-          # 5. build.gradle (root)
+          # 6. build.gradle (root)
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -307,7 +357,7 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # 6. app/build.gradle
+          # 7. app/build.gradle
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -317,8 +367,8 @@ jobs:
                   applicationId "com.freestyle.networkindicator"
                   minSdk 21
                   targetSdk 34
-                  versionCode 2
-                  versionName "2.0"
+                  versionCode 3
+                  versionName "3.0"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -363,5 +413,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NetworkIndicator-v2-debug
+          name: NetworkIndicator-v3-debug
           path: app/build/outputs/apk/debug/*.apk
