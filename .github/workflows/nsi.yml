@@ -171,7 +171,7 @@ jobs:
           }
           EOF
 
-          # 6. SpeedService.kt - SINGLE LINE icon (FONT DIPERBESAR)
+          # 6. SpeedService.kt - SINGLE LINE icon (FONT MAKSIMAL sebesar jam)
           cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -251,18 +251,19 @@ jobs:
               }
 
               /**
-               * SINGLE LINE icon generator dengan font lebih besar.
-               * - maxWidth diperlebar jadi 96% dari lebar icon
-               * - startSize dinaikkan jadi 85% ukuran icon
-               * Hasil akhir teks akan memenuhi hampir seluruh area icon.
+               * SINGLE LINE icon generator dengan font sebesar mungkin.
+               * - maxWidth = 98% dari lebar icon (hampir penuh)
+               * - startSize = 100% dari tinggi icon (maksimal)
+               * - Auto-fit akan mengecilkan font jika teks terlalu lebar,
+               *   namun tetap berusaha sebesar mungkin.
                */
               private fun makeIcon(label: String): Icon {
                   val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
                   canvas.drawColor(Color.TRANSPARENT)
 
-                  val maxWidth = ICON_SIZE * 0.96f   // lebih lebar (sebelumnya 0.92)
-                  val startSize = ICON_SIZE * 0.85f  // lebih besar (sebelumnya 0.55)
+                  val maxWidth = ICON_SIZE * 0.98f   // lebar maksimal 98% icon
+                  val startSize = ICON_SIZE.toFloat() // mulai dari 100% tinggi icon
 
                   paint.textSize = startSize
                   val measured = paint.measureText(label)
