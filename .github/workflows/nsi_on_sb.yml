@@ -1,0 +1,412 @@
+name: Build APK - Network Indicator (Overlay)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Project Structure & Code
+        run: |
+          mkdir -p app/src/main/java/com/freestyle/networkindicator
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          
+          # 1. strings.xml
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">Network Indicator</string>
+              <string name="overlay_permission">Izin Overlay</string>
+              <string name="start_service">Mulai Layanan</string>
+              <string name="stop_service">Hentikan Layanan</string>
+              <string name="status_text">Status: %s</string>
+              <string name="service_running">Layanan berjalan</string>
+              <string name="service_stopped">Layanan berhenti</string>
+              <string name="notification_title">Network Indicator Aktif</string>
+              <string name="notification_text">Ketuk untuk buka kontrol</string>
+          </resources>
+          EOF
+          
+          # 2. AndroidManifest.xml (tanpa LAUNCHER, hidden icon)
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+            
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/ic_menu_manage"
+                  android:label="@string/app_name"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar"
+                  android:usesCleartextTraffic="true"
+                  tools:ignore="UnusedAttribute">
+                  
+                  <!-- Activity tanpa LAUNCHER, hidden dari app drawer -->
+                  <activity android:name=".MainActivity"
+                      android:exported="true"
+                      android:label="@string/app_name">
+                      <!-- Tidak ada intent-filter LAUNCHER, jadi tidak muncul di drawer -->
+                  </activity>
+                  
+                  <service
+                      android:name=".OverlayService"
+                      android:exported="false"
+                      android:foregroundServiceType="dataSync" />
+              </application>
+          </manifest>
+          EOF
+          
+          # 3. MainActivity.kt (tanpa launcher icon)
+          cat > app/src/main/java/com/freestyle/networkindicator/MainActivity.kt << 'EOF'
+          package com.freestyle.networkindicator
+          
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+          
+          class MainActivity : Activity() {
+              private lateinit var statusText: TextView
+              private lateinit var startButton: Button
+              private lateinit var stopButton: Button
+              private lateinit var permissionButton: Button
+              
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(50, 50, 50, 50)
+                  }
+                  
+                  statusText = TextView(this).apply {
+                      text = getString(R.string.status_text, getString(R.string.service_stopped))
+                      textSize = 18f
+                      setPadding(0, 0, 0, 30)
+                  }
+                  
+                  permissionButton = Button(this).apply {
+                      text = getString(R.string.overlay_permission)
+                      setOnClickListener { requestOverlayPermission() }
+                  }
+                  
+                  startButton = Button(this).apply {
+                      text = getString(R.string.start_service)
+                      setOnClickListener { startOverlayService() }
+                  }
+                  
+                  stopButton = Button(this).apply {
+                      text = getString(R.string.stop_service)
+                      setOnClickListener { stopOverlayService() }
+                  }
+                  
+                  layout.addView(statusText)
+                  layout.addView(permissionButton)
+                  layout.addView(startButton)
+                  layout.addView(stopButton)
+                  setContentView(layout)
+                  
+                  updateStatus()
+              }
+              
+              override fun onResume() {
+                  super.onResume()
+                  updateStatus()
+              }
+              
+              private fun updateStatus() {
+                  val isRunning = OverlayService.isRunning
+                  statusText.text = getString(R.string.status_text, 
+                      if (isRunning) getString(R.string.service_running) else getString(R.string.service_stopped))
+                  
+                  val hasOverlayPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      Settings.canDrawOverlays(this)
+                  } else true
+                  
+                  permissionButton.isEnabled = !hasOverlayPerm
+                  startButton.isEnabled = hasOverlayPerm && !isRunning
+                  stopButton.isEnabled = isRunning
+              }
+              
+              private fun requestOverlayPermission() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      if (!Settings.canDrawOverlays(this)) {
+                          val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                              Uri.parse("package:$packageName"))
+                          startActivity(intent)
+                      }
+                  }
+              }
+              
+              private fun startOverlayService() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                      Toast.makeText(this, "Berikan izin overlay terlebih dahulu", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  startService(Intent(this, OverlayService::class.java))
+                  updateStatus()
+              }
+              
+              private fun stopOverlayService() {
+                  stopService(Intent(this, OverlayService::class.java))
+                  updateStatus()
+              }
+          }
+          EOF
+          
+          # 4. OverlayService.kt
+          cat > app/src/main/java/com/freestyle/networkindicator/OverlayService.kt << 'EOF'
+          package com.freestyle.networkindicator
+          
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.Color
+          import android.graphics.PixelFormat
+          import android.net.TrafficStats
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.view.Gravity
+          import android.view.WindowManager
+          import android.widget.TextView
+          import androidx.core.app.NotificationCompat
+          import java.util.Locale
+          
+          class OverlayService : Service() {
+              private lateinit var windowManager: WindowManager
+              private lateinit var overlayView: TextView
+              private val handler = Handler(Looper.getMainLooper())
+              private var isRunning = false
+              private var lastRxBytes = 0L
+              private var lastTxBytes = 0L
+              private var lastUpdateTime = 0L
+              
+              companion object {
+                  var isRunning = false
+                      private set
+              }
+              
+              override fun onCreate() {
+                  super.onCreate()
+                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+                  createOverlayView()
+                  startForegroundService()
+                  isRunning = true
+                  companion.isRunning = true
+                  lastRxBytes = TrafficStats.getTotalRxBytes()
+                  lastTxBytes = TrafficStats.getTotalTxBytes()
+                  lastUpdateTime = System.currentTimeMillis()
+                  startUpdater()
+              }
+              
+              private fun createOverlayView() {
+                  overlayView = TextView(this).apply {
+                      text = "0.0 KB/s"
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.parseColor("#DD000000"))
+                      setPadding(8, 4, 8, 4)
+                      textSize = 12f
+                      // Posisi di kiri atas, di bawah status bar (Y=40)
+                  }
+                  
+                  val params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      else
+                          WindowManager.LayoutParams.TYPE_PHONE,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                              WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.START or Gravity.TOP
+                      x = 0
+                      y = 40  // di bawah status bar
+                  }
+                  
+                  windowManager.addView(overlayView, params)
+              }
+              
+              private fun startForegroundService() {
+                  val channelId = "network_indicator_channel"
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(
+                          channelId,
+                          "Network Indicator",
+                          NotificationManager.IMPORTANCE_LOW
+                      ).apply {
+                          description = "Menampilkan kecepatan jaringan"
+                      }
+                      val notificationManager = getSystemService(NotificationManager::class.java)
+                      notificationManager.createNotificationChannel(channel)
+                  }
+                  
+                  val intent = Intent(this, MainActivity::class.java)
+                  val pendingIntent = PendingIntent.getActivity(this, 0, intent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                  
+                  val notification = NotificationCompat.Builder(this, channelId)
+                      .setContentTitle(getString(R.string.notification_title))
+                      .setContentText(getString(R.string.notification_text))
+                      .setSmallIcon(android.R.drawable.ic_menu_manage)
+                      .setContentIntent(pendingIntent)
+                      .setPriority(NotificationCompat.PRIORITY_LOW)
+                      .build()
+                  
+                  startForeground(1, notification)
+              }
+              
+              private fun startUpdater() {
+                  val runnable = object : Runnable {
+                      override fun run() {
+                          if (!isRunning) return
+                          updateSpeed()
+                          handler.postDelayed(this, 1000)
+                      }
+                  }
+                  handler.post(runnable)
+              }
+              
+              private fun updateSpeed() {
+                  val now = System.currentTimeMillis()
+                  val currentRx = TrafficStats.getTotalRxBytes()
+                  val currentTx = TrafficStats.getTotalTxBytes()
+                  
+                  if (lastRxBytes > 0 && lastTxBytes > 0 && lastUpdateTime > 0) {
+                      val deltaRx = currentRx - lastRxBytes
+                      val deltaTx = currentTx - lastTxBytes
+                      val deltaTime = (now - lastUpdateTime) / 1000.0
+                      
+                      if (deltaTime > 0) {
+                          val downSpeed = deltaRx / deltaTime
+                          val upSpeed = deltaTx / deltaTime
+                          
+                          val downStr = formatSpeed(downSpeed)
+                          val upStr = formatSpeed(upSpeed)
+                          
+                          overlayView.text = "▼ $downStr  ▲ $upStr"
+                      }
+                  }
+                  
+                  lastRxBytes = currentRx
+                  lastTxBytes = currentTx
+                  lastUpdateTime = now
+              }
+              
+              private fun formatSpeed(bytesPerSec: Double): String {
+                  return when {
+                      bytesPerSec >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB/s", bytesPerSec / (1024 * 1024))
+                      bytesPerSec >= 1024 -> String.format(Locale.US, "%.0f KB/s", bytesPerSec / 1024)
+                      else -> String.format(Locale.US, "%.0f B/s", bytesPerSec)
+                  }
+              }
+              
+              override fun onDestroy() {
+                  super.onDestroy()
+                  isRunning = false
+                  companion.isRunning = false
+                  handler.removeCallbacksAndMessages(null)
+                  if (::overlayView.isInitialized) {
+                      windowManager.removeView(overlayView)
+                  }
+              }
+              
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          EOF
+          
+          # 5. build.gradle (root)
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.1'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0"
+              }
+          }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+          
+          # 6. app/build.gradle
+          cat > app/build.gradle << 'EOF'
+          plugins { id 'com.android.application'; id 'kotlin-android' }
+          android {
+              namespace 'com.freestyle.networkindicator'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.freestyle.networkindicator"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          dependencies {
+              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
+              implementation "androidx.core:core-ktx:1.12.0"
+          }
+          EOF
+          
+          echo "include ':app'" > settings.gradle
+          echo "android.useAndroidX=true" > gradle.properties
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Platform 34 & Build Tools
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Generate Gradle Wrapper (Gradle 8.1.1)
+        run: |
+          wget https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
+          unzip -q gradle-8.1.1-bin.zip
+          ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
+          rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetworkIndicator-debug
+          path: app/build/outputs/apk/debug/*.apk
