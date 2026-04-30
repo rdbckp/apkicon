@@ -1,4 +1,4 @@
-name: Build APK - NSI v4.2 - Final Stable Font
+name: Build APK - NSI v4.2 - Stable Big Font (Fixed Build)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
           <resources>
               <string name="app_name">NSI v4.2</string>
               <string name="notif_channel">Network Speed</string>
-              <string name="notif_title">Speed Indicator</string>
+              <string name="notif_title">Network Speed Indicator</string>
           </resources>
           EOF
 
@@ -36,10 +36,12 @@ jobs:
           # 3. AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
 
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -48,7 +50,8 @@ jobs:
                   android:allowBackup="true"
                   android:icon="@android:drawable/ic_menu_manage"
                   android:label="@string/app_name"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar">
+                  android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar"
+                  tools:ignore="UnusedAttribute">
 
                   <activity
                       android:name=".MainActivity"
@@ -70,6 +73,7 @@ jobs:
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                       </intent-filter>
                   </receiver>
               </application>
@@ -105,12 +109,12 @@ jobs:
                   }
 
                   val startBtn = Button(this).apply {
-                      text = "START SERVICE"
+                      text = "Mulai"
                       setOnClickListener { startSpeedService(); updateStatus() }
                   }
 
                   val stopBtn = Button(this).apply {
-                      text = "STOP SERVICE"
+                      text = "Hentikan"
                       setOnClickListener {
                           stopService(Intent(this@MainActivity, SpeedService::class.java))
                           updateStatus()
@@ -139,9 +143,9 @@ jobs:
 
               private fun updateStatus() {
                   statusText.text = if (SpeedService.isRunning)
-                      "Status: ONLINE ✅\n\nIndikator font besar aktif."
+                      "Status: AKTIF ✅\n\nSpeed icon dengan font BESAR dan STABIL berjalan."
                   else
-                      "Status: OFFLINE ❌"
+                      "Status: MATI ❌"
               }
           }
           EOF
@@ -167,16 +171,27 @@ jobs:
           }
           EOF
 
-          # 6. SpeedService.kt - LOGIKA STABLE FONT
+          # 6. SpeedService.kt - STABLE BIG FONT LOGIC
           cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
-          import android.app.*
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
           import android.content.Intent
-          import android.graphics.*
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.graphics.Paint
+          import android.graphics.Typeface
           import android.graphics.drawable.Icon
           import android.net.TrafficStats
-          import android.os.*
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
           import java.util.Locale
 
           class SpeedService : Service() {
@@ -188,6 +203,7 @@ jobs:
 
               private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                   color = Color.WHITE
+                  // Ganti ke font standar sistem (sans-serif) tapi BOLD biar tebal setara jam
                   typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                   textAlign = Paint.Align.CENTER
               }
@@ -196,7 +212,7 @@ jobs:
                   var isRunning = false
                       private set
                   const val NOTIF_ID = 1
-                  const val CHANNEL_ID = "nsi_speed_v4"
+                  const val CHANNEL_ID = "nsi_speed"
                   const val ICON_SIZE = 96
               }
 
@@ -234,18 +250,26 @@ jobs:
                   lastTime = now
               }
 
+              /**
+               * STABLE BIG FONT logic
+               * Font dikunci tingginya (nggak pake measureText / auto fit lagi).
+               */
               private fun makeIcon(label: String): Icon {
                   val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
-                  
-                  // TextSize fix (72% dari canvas) biar setara tinggi jam
+                  canvas.drawColor(Color.TRANSPARENT)
+
+                  // TextSize di-fix ke 72% dari tinggi canvas
                   paint.textSize = ICON_SIZE * 0.72f 
 
+                  // Center horizontal
                   val xPos = ICON_SIZE / 2f
-                  // Formula visual centering pakai Font Metrics
+                  
+                  // Center vertikal pake metric (ascent & descent) jadi huruf fix di tengah secara visual
                   val yPos = (ICON_SIZE / 2f) - ((paint.descent() + paint.ascent()) / 2f)
 
                   canvas.drawText(label, xPos, yPos, paint)
+
                   return Icon.createWithBitmap(bmp)
               }
 
@@ -263,7 +287,8 @@ jobs:
                   )
                   return Notification.Builder(this, CHANNEL_ID)
                       .setSmallIcon(icon)
-                      .setContentTitle("Network Speed")
+                      .setContentTitle(getString(R.string.notif_title))
+                      .setContentText("")
                       .setContentIntent(pi)
                       .setOngoing(true)
                       .setOnlyAlertOnce(true)
@@ -287,18 +312,21 @@ jobs:
                   }
               }
 
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+                  START_STICKY
+
               override fun onDestroy() {
+                  super.onDestroy()
                   active = false
                   isRunning = false
                   handler.removeCallbacksAndMessages(null)
-                  super.onDestroy()
               }
+
               override fun onBind(intent: Intent?): IBinder? = null
           }
           EOF
 
-          # 6. root build.gradle
+          # 7. build.gradle root
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -310,7 +338,7 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # 7. app/build.gradle
+          # 8. app/build.gradle
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -320,7 +348,7 @@ jobs:
                   applicationId "com.freestyle.networkindicator"
                   minSdk 23
                   targetSdk 34
-                  versionCode 7
+                  versionCode 6
                   versionName "4.2"
               }
               compileOptions {
@@ -335,7 +363,7 @@ jobs:
           EOF
 
           echo "include ':app'" > settings.gradle
-          echo "android.useAndroidX=true" > gradle.properties
+          echo "android.useAndroidX=false" > gradle.properties
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -343,12 +371,27 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build APK with Gradle
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Platform 34 & Build Tools
         run: |
-          gradle assembleDebug --no-daemon
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Generate Gradle Wrapper
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
+          unzip -q gradle-8.1.1-bin.zip
+          ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
+          rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NSI-v4.2-Fixed
+          name: NSI-v4.2-StableBigFont
           path: app/build/outputs/apk/debug/*.apk
