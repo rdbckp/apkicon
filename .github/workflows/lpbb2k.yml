@@ -6,7 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Create Project Structure
         run: |
@@ -14,7 +13,7 @@ jobs:
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/values
           
-          # 1. Resource Strings (Wajib ada biar AAPT gak error)
+          # 1. Resource Strings
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -57,7 +56,7 @@ jobs:
           </manifest>
           EOF
           
-          # 3. MainActivity (Standard Activity)
+          # 3. MainActivity
           cat > app/src/main/java/com/freestyle/longpresskill/MainActivity.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.os.Bundle
@@ -195,10 +194,19 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Generate Gradle Wrapper (The Fix)
+      - name: Install Android SDK Platform 34 and Build Tools
         run: |
-          # Perintah ini akan membuat gradlew, jar, dan properties secara otomatis
-          gradle wrapper --gradle-version 8.1.1
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Generate Gradle Wrapper (using compatible Gradle 8.1.1)
+        run: |
+          # Download Gradle 8.1.1 binary (compatible with AGP 8.1.1)
+          wget https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
+          unzip -q gradle-8.1.1-bin.zip
+          # Generate wrapper using this specific Gradle version
+          ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
+          # Clean up downloaded Gradle (optional)
+          rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
 
       - name: Build APK
         run: |
