@@ -1,4 +1,4 @@
-name: Build APK - LongPressKill (Final Fix)
+name: Build APK - LPBB
 
 on:
   workflow_dispatch:
