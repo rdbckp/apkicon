@@ -1,23 +1,207 @@
-name: 2 - Build APK
+name: Build APK - Network Indicator
 
 on:
   workflow_dispatch:
-    inputs:
-      run_id:
-        description: 'Run ID dari workflow "Prepare Project" (cek URL atau daftar run)'
-        required: true
-        type: number
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Download prepared project (dari run ID tertentu)
-        uses: actions/download-artifact@v4
-        with:
-          name: android-project-source
-          run-id: ${{ github.event.inputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Project Structure
+        run: |
+          mkdir -p app/src/main/java/com/freestyle/netindicator
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/values
+          
+          # 1. Strings Resource
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">Net Indicator</string>
+              <string name="acc_desc">Menampilkan kecepatan internet di status bar.</string>
+          </resources>
+          EOF
+          
+          # 2. Android Manifest (Overlay + Accessibility)
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.freestyle.netindicator">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <application
+                  android:label="@string/app_name"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar">
+                  <activity android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".NetworkService"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
+                  </service>
+              </application>
+          </manifest>
+          EOF
+          
+          # 3. MainActivity (Minta Izin Overlay & Accessibility)
+          cat > app/src/main/java/com/freestyle/netindicator/MainActivity.kt << 'EOF'
+          package com.freestyle.netindicator
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.Toast
+
+          class MainActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(60, 60, 60, 60)
+                  }
+                  val btnOverlay = Button(this).apply {
+                      text = "1. Izin Overlay (Wajib)"
+                      setOnClickListener {
+                          if (!Settings.canDrawOverlays(this@MainActivity)) {
+                              startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                          } else {
+                              Toast.makeText(context, "Izin Overlay OK", Toast.LENGTH_SHORT).show()
+                          }
+                      }
+                  }
+                  val btnAcc = Button(this).apply {
+                      text = "2. Aktifkan Service"
+                      setOnClickListener {
+                          startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                      }
+                  }
+                  layout.addView(btnOverlay)
+                  layout.addView(btnAcc)
+                  setContentView(layout)
+              }
+          }
+          EOF
+          
+          # 4. Network Service Logic (Speed Meter)
+          cat > app/src/main/java/com/freestyle/netindicator/NetworkService.kt << 'EOF'
+          package com.freestyle.netindicator
+          import android.accessibilityservice.AccessibilityService
+          import android.graphics.Color
+          import android.graphics.PixelFormat
+          import android.net.TrafficStats
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.Gravity
+          import android.view.WindowManager
+          import android.widget.TextView
+          import java.util.*
+
+          class NetworkService : AccessibilityService() {
+              private var windowManager: WindowManager? = null
+              private var speedView: TextView? = null
+              private var lastRxBytes = 0L
+              private val handler = Handler(Looper.getMainLooper())
+
+              private val updateRunnable = object : Runnable {
+                  override fun run() {
+                      val currentRxBytes = TrafficStats.getTotalRxBytes()
+                      val speed = (currentRxBytes - lastRxBytes) / 1024
+                      lastRxBytes = currentRxBytes
+                      
+                      speedView?.text = if (speed < 1024) "${speed}K" else "${String.format("%.1f", speed/1024.0)}M"
+                      handler.postDelayed(this, 1000)
+                  }
+              }
+
+              override fun onServiceConnected() {
+                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+                  speedView = TextView(this).apply {
+                      setTextColor(Color.WHITE)
+                      textSize = 10f
+                      setShadowLayer(2f, 1f, 1f, Color.BLACK)
+                  }
+
+                  val params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.END
+                      x = 180 // Jarak dari kanan (sebelah kiri ikon signal/wifi)
+                      y = 5   // Atur biar pas di tengah bar
+                  }
+
+                  windowManager?.addView(speedView, params)
+                  lastRxBytes = TrafficStats.getTotalRxBytes()
+                  handler.post(updateRunnable)
+              }
+
+              override fun onInterrupt() {}
+              override fun onDestroy() {
+                  super.onDestroy()
+                  windowManager?.removeView(speedView)
+                  handler.removeCallbacks(updateRunnable)
+              }
+          }
+          EOF
+          
+          # 5. Accessibility Config
+          cat > app/src/main/res/xml/accessibility_config.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:description="@string/acc_desc"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagDefault"
+              android:canRetrieveWindowContent="false" />
+          EOF
+
+          # 6. Build Files
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.1'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0"
+              }
+          }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+
+          cat > app/build.gradle << 'EOF'
+          plugins { id 'com.android.application'; id 'kotlin-android' }
+          android {
+              namespace 'com.freestyle.netindicator'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.freestyle.netindicator"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+          }
+          dependencies { implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0" }
+          EOF
+          
+          echo "include ':app'" > settings.gradle
+          echo "android.useAndroidX=true" > gradle.properties
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -28,18 +212,16 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Build Tools & Platform 34
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Make gradlew executable
-        run: chmod +x gradlew
+      - name: Generate Wrapper
+        run: gradle wrapper --gradle-version 8.1.1
 
       - name: Build APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LongPressKill-debug-apk
+          name: NetIndicator-Build
           path: app/build/outputs/apk/debug/*.apk
