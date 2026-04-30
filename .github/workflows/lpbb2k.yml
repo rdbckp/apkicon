@@ -1,4 +1,4 @@
-name: Build APK - Final Fix
+name: Build APK - Fix Broken Pipe
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ jobs:
           mkdir -p app/src/main/java/com/freestyle/longpresskill
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/values
+          mkdir -p gradle/wrapper
           
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -164,17 +165,17 @@ jobs:
           cat > app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
+              id 'kotlin-android'
           }
           
           android {
               namespace 'com.freestyle.longpresskill'
-              compileSdk 34
+              compileSdk 33
               
               defaultConfig {
                   applicationId "com.freestyle.longpresskill"
                   minSdk 29
-                  targetSdk 34
+                  targetSdk 33
                   versionCode 1
                   versionName "1.0"
               }
@@ -190,7 +191,7 @@ jobs:
           }
           
           dependencies {
-              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.core:core-ktx:1.9.0'
               implementation 'androidx.appcompat:appcompat:1.6.1'
           }
           EOF
@@ -202,8 +203,8 @@ jobs:
                   mavenCentral()
               }
               dependencies {
-                  classpath 'com.android.tools.build:gradle:8.1.4'
-                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0'
+                  classpath 'com.android.tools.build:gradle:7.4.2'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.0"
               }
           }
           
@@ -240,33 +241,48 @@ jobs:
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx2048m
           android.useAndroidX=true
-          android.enableJetifier=true
           EOF
           
-          mkdir -p gradle/wrapper
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
           EOF
           
           echo "✅ Project created"
           
-      - name: Setup JDK
+      - name: Setup JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: 17
+          java-version: 11
           distribution: 'temurin'
           
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        
-      - name: Generate gradle wrapper
+      - name: Install Android SDK (NO 'yes' command)
         run: |
-          cd app && ln -s ../gradle . && cd ..
-          wget -q https://github.com/gradle/gradle/raw/v8.2.0/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
+          # Download cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          
+          # Accept licenses WITHOUT 'yes' (pakai expect atau input redirection)
+          mkdir -p $ANDROID_HOME/licenses
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > $ANDROID_HOME/licenses/android-sdk-preview-license
+          
+          # Install SDK components
+          sdkmanager "platforms;android-33" "build-tools;33.0.2" --verbose
+          
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          
+      - name: Download gradle wrapper
+        run: |
+          wget -q https://raw.githubusercontent.com/gradle/gradle/v7.5.0/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
           cat > gradlew << 'EOF'
           #!/bin/bash
           exec gradle "$@"
@@ -275,8 +291,8 @@ jobs:
           
       - name: Build APK
         run: |
-          export JAVA_HOME=$JAVA_HOME_17_X64
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          export ANDROID_HOME=$HOME/android-sdk
+          ./gradlew assembleDebug --no-daemon
           
       - name: Upload APK
         uses: actions/upload-artifact@v4
