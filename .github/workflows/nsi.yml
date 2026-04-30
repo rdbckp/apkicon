@@ -29,7 +29,7 @@ jobs:
           </resources>
           EOF
           
-          # 2. AndroidManifest.xml (tanpa LAUNCHER, hidden icon)
+          # 2. AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -50,11 +50,13 @@ jobs:
                   android:usesCleartextTraffic="true"
                   tools:ignore="UnusedAttribute">
                   
-                  <!-- Activity tanpa LAUNCHER, hidden dari app drawer -->
                   <activity android:name=".MainActivity"
                       android:exported="true"
                       android:label="@string/app_name">
-                      <!-- Tidak ada intent-filter LAUNCHER, jadi tidak muncul di drawer -->
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
                   </activity>
                   
                   <service
@@ -65,7 +67,7 @@ jobs:
           </manifest>
           EOF
           
-          # 3. MainActivity.kt (tanpa launcher icon)
+          # 3. MainActivity.kt
           cat > app/src/main/java/com/freestyle/networkindicator/MainActivity.kt << 'EOF'
           package com.freestyle.networkindicator
           
@@ -169,7 +171,7 @@ jobs:
           }
           EOF
           
-          # 4. OverlayService.kt
+          # 4. OverlayService.kt (FIXED: companion object conflict & naming)
           cat > app/src/main/java/com/freestyle/networkindicator/OverlayService.kt << 'EOF'
           package com.freestyle.networkindicator
           
@@ -197,7 +199,8 @@ jobs:
               private lateinit var windowManager: WindowManager
               private lateinit var overlayView: TextView
               private val handler = Handler(Looper.getMainLooper())
-              private var isRunning = false
+              // FIX: rename instance var supaya tidak conflict dengan companion object
+              private var _serviceActive = false
               private var lastRxBytes = 0L
               private var lastTxBytes = 0L
               private var lastUpdateTime = 0L
@@ -211,9 +214,10 @@ jobs:
                   super.onCreate()
                   windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
                   createOverlayView()
-                  startForegroundService()
+                  startForegroundNotification()
+                  // FIX: set via nama class, bukan "companion.isRunning"
+                  _serviceActive = true
                   isRunning = true
-                  companion.isRunning = true
                   lastRxBytes = TrafficStats.getTotalRxBytes()
                   lastTxBytes = TrafficStats.getTotalTxBytes()
                   lastUpdateTime = System.currentTimeMillis()
@@ -227,7 +231,6 @@ jobs:
                       setBackgroundColor(Color.parseColor("#DD000000"))
                       setPadding(8, 4, 8, 4)
                       textSize = 12f
-                      // Posisi di kiri atas, di bawah status bar (Y=40)
                   }
                   
                   val params = WindowManager.LayoutParams(
@@ -236,6 +239,7 @@ jobs:
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                           WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                       else
+                          @Suppress("DEPRECATION")
                           WindowManager.LayoutParams.TYPE_PHONE,
                       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                               WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -244,13 +248,13 @@ jobs:
                   ).apply {
                       gravity = Gravity.START or Gravity.TOP
                       x = 0
-                      y = 40  // di bawah status bar
+                      y = 40
                   }
                   
                   windowManager.addView(overlayView, params)
               }
               
-              private fun startForegroundService() {
+              private fun startForegroundNotification() {
                   val channelId = "network_indicator_channel"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val channel = NotificationChannel(
@@ -282,7 +286,7 @@ jobs:
               private fun startUpdater() {
                   val runnable = object : Runnable {
                       override fun run() {
-                          if (!isRunning) return
+                          if (!_serviceActive) return
                           updateSpeed()
                           handler.postDelayed(this, 1000)
                       }
@@ -326,8 +330,9 @@ jobs:
               
               override fun onDestroy() {
                   super.onDestroy()
+                  // FIX: hapus "companion.isRunning = false" yang invalid
+                  _serviceActive = false
                   isRunning = false
-                  companion.isRunning = false
                   handler.removeCallbacksAndMessages(null)
                   if (::overlayView.isInitialized) {
                       windowManager.removeView(overlayView)
