@@ -162,7 +162,6 @@ jobs:
           </resources>
           EOF
 
-          # app/build.gradle - naikan AGP ke 8.1.0
           cat > app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
@@ -197,7 +196,6 @@ jobs:
           }
           EOF
 
-          # build.gradle - naikan AGP ke 8.1.0 & Kotlin ke 1.9.0
           cat > build.gradle << 'EOF'
           buildscript {
               repositories {
@@ -245,7 +243,6 @@ jobs:
           android.useAndroidX=true
           EOF
 
-          # gradle-wrapper.properties - naikan Gradle ke 8.0
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -285,11 +282,9 @@ jobs:
 
       - name: Download Gradle Wrapper
         run: |
+          # Download gradlew ASLI dari Gradle, bukan bikin sendiri
+          wget -q https://raw.githubusercontent.com/gradle/gradle/v8.0.0/gradlew -O gradlew
           wget -q https://raw.githubusercontent.com/gradle/gradle/v8.0.0/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
-          cat > gradlew << 'EOF'
-          #!/bin/bash
-          exec gradle "$@"
-          EOF
           chmod +x gradlew
 
       - name: Build APK
