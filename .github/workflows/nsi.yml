@@ -22,7 +22,7 @@ jobs:
               <string name="app_name">Network Speed</string>
               <string name="overlay_permission">Overlay Permission</string>
               <string name="notification_title">📶 Network Speed Active</string>
-              <string name="notification_text">Tap to open settings</string>
+              <string name="notification_text">Tap to open accessibility settings</string>
               <string name="accessibility_service_label">Network Speed</string>
               <string name="accessibility_service_description">Show download speed overlay in status bar area</string>
           </resources>
@@ -49,7 +49,6 @@ jobs:
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
                   android:usesCleartextTraffic="true">
 
-                  <!-- No MAIN/LAUNCHER activity = no icon in app drawer -->
                   <service
                       android:name=".OverlayService"
                       android:exported="false"
@@ -71,7 +70,7 @@ jobs:
           </manifest>
           EOF
 
-          # ====================== OVERLAY SERVICE (KANAN ATAS, HANYA DOWNLOAD, FONT KECIL) ======================
+          # ====================== OVERLAY SERVICE (Fix: added missing import Settings) ======================
           cat > app/src/main/java/com/network/speed/OverlayService.kt << 'EOF'
           package com.network.speed
 
@@ -89,8 +88,8 @@ jobs:
           import android.os.Handler
           import android.os.IBinder
           import android.os.Looper
+          import android.provider.Settings
           import android.view.Gravity
-          import android.view.View
           import android.view.WindowManager
           import android.widget.TextView
           import androidx.core.app.NotificationCompat
@@ -125,9 +124,8 @@ jobs:
                   overlayView = TextView(this).apply {
                       text = "0 KB/s"
                       setTextColor(Color.WHITE)
-                      setBackgroundColor(Color.parseColor("#88000000")) // semi transparan
+                      setBackgroundColor(Color.parseColor("#88000000"))
                       setPadding(6, 2, 6, 2)
-                      // Font size 11sp (setara baterai)
                       textSize = 11f
                   }
 
@@ -144,13 +142,10 @@ jobs:
                               WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                       PixelFormat.TRANSLUCENT
                   ).apply {
-                      // POSISI: Kanan atas (di dalam status bar)
                       gravity = Gravity.TOP or Gravity.END
-                      x = 0   // nanti geser kiri dengan margin di layout? Kita atur margin end via padding? Lebih mudah: x = -40dp dalam pixel
-                      y = 0   // pas di paling atas
-                      // Hitung offset negatif agar tidak nutup icon wifi (misal 40dp)
+                      y = 0
                       val density = resources.displayMetrics.density
-                      val offsetPx = (-40 * density).toInt()  // geser ke kiri 40dp
+                      val offsetPx = (-40 * density).toInt()
                       x = offsetPx
                   }
 
@@ -172,7 +167,6 @@ jobs:
                       notificationManager.createNotificationChannel(channel)
                   }
 
-                  // Intent dummy untuk settings (bisa buka halaman accessibility)
                   val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                   val pendingIntent = PendingIntent.getActivity(this, 0, intent,
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -241,7 +235,7 @@ jobs:
           }
           EOF
 
-          # ====================== ACCESSIBILITY SERVICE (KONTROL START/STOP) ======================
+          # ====================== ACCESSIBILITY SERVICE (fix: added import Settings) ======================
           cat > app/src/main/java/com/network/speed/NetworkSpeedAccessibilityService.kt << 'EOF'
           package com.network.speed
 
@@ -255,7 +249,6 @@ jobs:
 
               override fun onServiceConnected() {
                   super.onServiceConnected()
-                  // Cek izin overlay, jika belum ada minta user setujui
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                       if (!Settings.canDrawOverlays(this)) {
                           val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -264,7 +257,6 @@ jobs:
                           startActivity(intent)
                       }
                   }
-                  // Mulai overlay service
                   startOverlayService()
               }
 
@@ -278,12 +270,9 @@ jobs:
                   stopService(intent)
               }
 
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-                  // Tidak perlu aksi khusus
-              }
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
               override fun onInterrupt() {
-                  // Service diinterrupt (misal dimatikan user di settings)
                   stopOverlayService()
               }
 
