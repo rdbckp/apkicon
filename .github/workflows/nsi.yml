@@ -1,4 +1,4 @@
-name: Build APK - Network Indicator (Accessibility + No Launcher)
+name: Build APK - Network Indicator (Termux Control)
 
 on:
   workflow_dispatch:
@@ -7,46 +7,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Create Project Structure & Code
+      - name: Create Project Structure & Code (Fix for A02)
         run: |
           mkdir -p app/src/main/java/com/network/speed
-          mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/xml
-          mkdir -p app/src/main/res/drawable
 
-          # ====================== STRINGS ======================
+          # 1. Strings
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="app_name">Network Speed</string>
-              <string name="overlay_permission">Overlay Permission</string>
-              <string name="notification_title">📶 Network Speed Active</string>
-              <string name="notification_text">Tap to open accessibility settings</string>
-              <string name="accessibility_service_label">Network Speed</string>
-              <string name="accessibility_service_description">Show download speed overlay in status bar area</string>
+              <string name="app_name">NetSpeed</string>
+              <string name="notification_title">NetSpeed Active</string>
+              <string name="notification_text">Run am broadcast -a com.network.speed.STOP_OVERLAY to stop</string>
           </resources>
           EOF
 
-          # ====================== ANDROID MANIFEST (no launcher) ======================
+          # 2. AndroidManifest.xml (Tanpa Activity & Penerima Broadcast)
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:tools="http://schemas.android.com/tools">
 
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+              <!-- Izin untuk priv-app agar aplikasi bisa nempel di system (jika perlu) -->
+              <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions"/>
 
               <application
                   android:allowBackup="true"
-                  android:icon="@android:drawable/ic_menu_manage"
+                  android:icon="@android:drawable/stat_sys_download"
                   android:label="@string/app_name"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+                  android:theme="@android:style/Theme.NoDisplay"
                   android:usesCleartextTraffic="true">
 
                   <service
@@ -54,32 +50,28 @@ jobs:
                       android:exported="false"
                       android:foregroundServiceType="dataSync" />
 
-                  <service
-                      android:name=".NetworkSpeedAccessibilityService"
-                      android:exported="true"
-                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                  <!-- Receiver untuk menerima perintah dari Termux -->
+                  <receiver
+                      android:name=".ControlReceiver"
+                      android:exported="true">
                       <intent-filter>
-                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                          <action android:name="com.network.speed.START_OVERLAY" />
+                          <action android:name="com.network.speed.STOP_OVERLAY" />
                       </intent-filter>
-                      <meta-data
-                          android:name="android.accessibilityservice"
-                          android:resource="@xml/accessibility_service_config" />
-                  </service>
+                  </receiver>
 
               </application>
           </manifest>
           EOF
 
-          # ====================== OVERLAY SERVICE (Fix: added missing import Settings) ======================
+          # 3. OverlayService.kt (Menggunakan background terang agar lebih terlihat)
           cat > app/src/main/java/com/network/speed/OverlayService.kt << 'EOF'
           package com.network.speed
 
-          import android.app.Notification
           import android.app.NotificationChannel
           import android.app.NotificationManager
           import android.app.PendingIntent
           import android.app.Service
-          import android.content.Context
           import android.content.Intent
           import android.graphics.Color
           import android.graphics.PixelFormat
@@ -89,7 +81,9 @@ jobs:
           import android.os.IBinder
           import android.os.Looper
           import android.provider.Settings
+          import android.util.Log
           import android.view.Gravity
+          import android.view.View
           import android.view.WindowManager
           import android.widget.TextView
           import androidx.core.app.NotificationCompat
@@ -97,19 +91,27 @@ jobs:
 
           class OverlayService : Service() {
               private lateinit var windowManager: WindowManager
-              private lateinit var overlayView: TextView
+              private var overlayView: TextView? = null
               private val handler = Handler(Looper.getMainLooper())
               private var isActive = false
               private var lastRxBytes = 0L
               private var lastUpdateTime = 0L
+              private val TAG = "OverlayServiceFix"
 
               companion object {
                   var isRunning = false
-                      private set
               }
 
               override fun onCreate() {
                   super.onCreate()
+                  Log.d(TAG, "Service onCreate")
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                      Log.e(TAG, "No overlay permission, stopping")
+                      stopSelf()
+                      return
+                  }
+
                   windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
                   createOverlayView()
                   startForegroundNotification()
@@ -118,64 +120,56 @@ jobs:
                   lastRxBytes = TrafficStats.getTotalRxBytes()
                   lastUpdateTime = System.currentTimeMillis()
                   startUpdater()
+                  Log.d(TAG, "Service started successfully")
               }
 
               private fun createOverlayView() {
-                  overlayView = TextView(this).apply {
-                      text = "0 KB/s"
-                      setTextColor(Color.WHITE)
-                      setBackgroundColor(Color.parseColor("#88000000"))
-                      setPadding(6, 2, 6, 2)
+                  val tv = TextView(this).apply {
+                      text = "▼ 0 KB/s"
+                      setTextColor(Color.BLACK) // Warna hitam agar kontras di status bar putih
+                      setBackgroundColor(Color.parseColor("#AAFFFFFF")) // Putih transparan
+                      setPadding(8, 2, 8, 2)
                       textSize = 11f
                   }
+                  overlayView = tv
+
+                  // Menggunakan TYPE_ACCESSIBILITY_OVERLAY yang lebih mungkin berhasil di semua ROM
+                  val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                  else
+                      WindowManager.LayoutParams.TYPE_PHONE
 
                   val params = WindowManager.LayoutParams(
                       WindowManager.LayoutParams.WRAP_CONTENT,
                       WindowManager.LayoutParams.WRAP_CONTENT,
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                      else
-                          @Suppress("DEPRECATION")
-                          WindowManager.LayoutParams.TYPE_PHONE,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                              WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      type,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                       PixelFormat.TRANSLUCENT
                   ).apply {
                       gravity = Gravity.TOP or Gravity.END
+                      x = 0
                       y = 0
-                      val density = resources.displayMetrics.density
-                      val offsetPx = (-40 * density).toInt()
-                      x = offsetPx
                   }
 
-                  windowManager.addView(overlayView, params)
+                  try {
+                      windowManager.addView(tv, params)
+                      Log.d(TAG, "Overlay view added")
+                  } catch (e: Exception) {
+                      Log.e(TAG, "Failed to add overlay", e)
+                  }
               }
 
               private fun startForegroundNotification() {
-                  val channelId = "network_speed_channel"
+                  val channelId = "net_speed"
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(
-                          channelId,
-                          "Network Speed",
-                          NotificationManager.IMPORTANCE_LOW
-                      ).apply {
-                          description = "Shows download speed overlay"
-                          setShowBadge(false)
-                      }
-                      val notificationManager = getSystemService(NotificationManager::class.java)
-                      notificationManager.createNotificationChannel(channel)
+                      val channel = NotificationChannel(channelId, "Network Speed", NotificationManager.IMPORTANCE_LOW)
+                      getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
                   }
-
-                  val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                  val pendingIntent = PendingIntent.getActivity(this, 0, intent,
-                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
                   val notification = NotificationCompat.Builder(this, channelId)
                       .setContentTitle(getString(R.string.notification_title))
                       .setContentText(getString(R.string.notification_text))
-                      .setSmallIcon(android.R.drawable.ic_menu_manage)
-                      .setContentIntent(pendingIntent)
+                      .setSmallIcon(android.R.drawable.stat_sys_download)
                       .setPriority(NotificationCompat.PRIORITY_LOW)
                       .setOngoing(true)
                       .build()
@@ -201,11 +195,14 @@ jobs:
                   if (lastRxBytes > 0 && lastUpdateTime > 0) {
                       val deltaRx = currentRx - lastRxBytes
                       val deltaTime = (now - lastUpdateTime) / 1000.0
-
                       if (deltaTime > 0) {
                           val downSpeed = deltaRx / deltaTime
-                          val downStr = formatSpeed(downSpeed)
-                          overlayView.text = "▼ $downStr"
+                          val speedText = when {
+                              downSpeed >= 1024 * 1024 -> String.format(Locale.US, "▼ %.1f MB/s", downSpeed / (1024 * 1024))
+                              downSpeed >= 1024 -> String.format(Locale.US, "▼ %.0f KB/s", downSpeed / 1024)
+                              else -> String.format(Locale.US, "▼ %.0f B/s", downSpeed)
+                          }
+                          overlayView?.text = speedText
                       }
                   }
 
@@ -213,90 +210,50 @@ jobs:
                   lastUpdateTime = now
               }
 
-              private fun formatSpeed(bytesPerSec: Double): String {
-                  return when {
-                      bytesPerSec >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB/s", bytesPerSec / (1024 * 1024))
-                      bytesPerSec >= 1024 -> String.format(Locale.US, "%.0f KB/s", bytesPerSec / 1024)
-                      else -> String.format(Locale.US, "%.0f B/s", bytesPerSec)
-                  }
-              }
-
               override fun onDestroy() {
                   super.onDestroy()
                   isActive = false
                   isRunning = false
                   handler.removeCallbacksAndMessages(null)
-                  if (::overlayView.isInitialized) {
-                      windowManager.removeView(overlayView)
-                  }
+                  overlayView?.let { windowManager.removeView(it) }
               }
 
               override fun onBind(intent: Intent?): IBinder? = null
           }
           EOF
 
-          # ====================== ACCESSIBILITY SERVICE (fix: added import Settings) ======================
-          cat > app/src/main/java/com/network/speed/NetworkSpeedAccessibilityService.kt << 'EOF'
+          # 4. ControlReceiver.kt (Pintu Masuk dari Termux)
+          cat > app/src/main/java/com/network/speed/ControlReceiver.kt << 'EOF'
           package com.network.speed
 
-          import android.accessibilityservice.AccessibilityService
+          import android.content.BroadcastReceiver
+          import android.content.Context
           import android.content.Intent
           import android.os.Build
           import android.provider.Settings
-          import android.view.accessibility.AccessibilityEvent
+          import android.util.Log
 
-          class NetworkSpeedAccessibilityService : AccessibilityService() {
+          class ControlReceiver : BroadcastReceiver() {
+              private val TAG = "ControlReceiver"
 
-              override fun onServiceConnected() {
-                  super.onServiceConnected()
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      if (!Settings.canDrawOverlays(this)) {
-                          val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                              android.net.Uri.parse("package:$packageName"))
-                          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                          startActivity(intent)
+              override fun onReceive(context: Context, intent: Intent) {
+                  val action = intent.action ?: return
+                  Log.d(TAG, "Received action: $action")
+
+                  if (action == "com.network.speed.START_OVERLAY") {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+                          Log.e(TAG, "Overlay permission denied. Run: appops set com.network.speed SYSTEM_ALERT_WINDOW allow")
+                          return
                       }
+                      context.startService(Intent(context, OverlayService::class.java))
+                  } else if (action == "com.network.speed.STOP_OVERLAY") {
+                      context.stopService(Intent(context, OverlayService::class.java))
                   }
-                  startOverlayService()
-              }
-
-              private fun startOverlayService() {
-                  val intent = Intent(this, OverlayService::class.java)
-                  startService(intent)
-              }
-
-              private fun stopOverlayService() {
-                  val intent = Intent(this, OverlayService::class.java)
-                  stopService(intent)
-              }
-
-              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-
-              override fun onInterrupt() {
-                  stopOverlayService()
-              }
-
-              override fun onDestroy() {
-                  super.onDestroy()
-                  stopOverlayService()
               }
           }
           EOF
 
-          # ====================== ACCESSIBILITY CONFIG XML ======================
-          cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeAllMask"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:accessibilityFlags="flagDefault"
-              android:canPerformGestures="false"
-              android:canRetrieveWindowContent="false"
-              android:description="@string/accessibility_service_description"
-              android:notificationTimeout="100" />
-          EOF
-
-          # ====================== ROOT BUILD.GRADLE ======================
+          # 5. build.gradle (sesuai ARM 32-bit)
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -308,7 +265,6 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # ====================== APP BUILD.GRADLE ======================
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -345,9 +301,8 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK Platform 34 & Build Tools
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Install SDK
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Generate Gradle Wrapper
         run: |
@@ -364,5 +319,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NetworkSpeed-NoIcon-Accessibility
+          name: NetSpeed-Termux
           path: app/build/outputs/apk/debug/*.apk
