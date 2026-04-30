@@ -7,13 +7,12 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
-      - name: Create Android Project Structure
+      - name: Create Project Structure
         run: |
           mkdir -p app/src/main/java/com/freestyle/longpresskill
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/values
           
-          # 1. strings.xml
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -22,7 +21,6 @@ jobs:
           </resources>
           EOF
           
-          # 2. AndroidManifest.xml (tanpa package attribute biar tidak deprecated warning)
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -55,7 +53,6 @@ jobs:
           </manifest>
           EOF
           
-          # 3. MainActivity.kt
           cat > app/src/main/java/com/freestyle/longpresskill/MainActivity.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.os.Bundle
@@ -98,7 +95,6 @@ jobs:
           }
           EOF
           
-          # 4. LongPressKillService.kt
           cat > app/src/main/java/com/freestyle/longpresskill/LongPressKillService.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.accessibilityservice.AccessibilityService
@@ -141,7 +137,6 @@ jobs:
           }
           EOF
           
-          # 5. accessibility_service_config.xml
           cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -153,7 +148,6 @@ jobs:
               android:notificationTimeout="100" />
           EOF
           
-          # 6. Root build.gradle
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -165,7 +159,6 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
           
-          # 7. app/build.gradle (DIPERBAIKI dengan compileOptions dan kotlinOptions)
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -205,17 +198,18 @@ jobs:
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Generate Gradle Wrapper (Gradle 8.1.1)
+      - name: Generate Gradle Wrapper
         run: |
           wget https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
           unzip -q gradle-8.1.1-bin.zip
           ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
           rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
 
-      - name: Upload entire project as artifact
+      - name: Upload Project Artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-project-source
           path: |
             .
             !gradle-8.1.1-bin.zip
+          if-no-files-found: error
