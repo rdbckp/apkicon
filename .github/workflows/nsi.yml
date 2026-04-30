@@ -1,4 +1,4 @@
-name: Build APK - NSI v4 - Notification Icon Bitmap
+name: Build APK - NSI v4.1 - Single Line Icon
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
           </resources>
           EOF
 
-          # 2. ic_placeholder.xml - dummy icon (transparent 1x1, buat fallback)
+          # 2. ic_placeholder.xml
           cat > app/src/main/res/drawable/ic_placeholder.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android"
@@ -80,7 +80,7 @@ jobs:
           </manifest>
           EOF
 
-          # 4. MainActivity.kt - simpel, cuma kontrol start/stop
+          # 4. MainActivity.kt
           cat > app/src/main/java/com/freestyle/networkindicator/MainActivity.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -143,9 +143,9 @@ jobs:
 
               private fun updateStatus() {
                   statusText.text = if (SpeedService.isRunning)
-                      "Status: AKTIF ✅\n\nSpeed muncul di notification icon area SB."
+                      "Status: AKTIF ✅\n\nSpeed icon 1 baris di notification area SB."
                   else
-                      "Status: MATI ❌\n\nTeknik: bitmap Canvas di-generate on-the-fly,\ndi-set sebagai smallIcon foreground notification."
+                      "Status: MATI ❌"
               }
           }
           EOF
@@ -171,7 +171,7 @@ jobs:
           }
           EOF
 
-          # 6. SpeedService.kt - CORE: generate bitmap speed icon tiap detik
+          # 6. SpeedService.kt - SINGLE LINE icon
           cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -185,6 +185,7 @@ jobs:
           import android.graphics.Canvas
           import android.graphics.Color
           import android.graphics.Paint
+          import android.graphics.Rect
           import android.graphics.Typeface
           import android.graphics.drawable.Icon
           import android.net.TrafficStats
@@ -201,9 +202,9 @@ jobs:
               private var lastRxBytes = 0L
               private var lastTime = 0L
 
-              // Paint untuk gambar teks di bitmap - dibuat sekali, reuse
               private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                   color = Color.WHITE
+                  // sans-serif-condensed supaya muat lebih lebar di icon kecil
                   typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
                   textAlign = Paint.Align.CENTER
               }
@@ -213,16 +214,14 @@ jobs:
                       private set
                   const val NOTIF_ID = 1
                   const val CHANNEL_ID = "nsi_speed"
-                  // Ukuran bitmap icon: 96x96px
-                  // ISM pakai 48x48 (hdpi), tapi kita 96x96 supaya tajam di xxhdpi
+                  // 96x96 supaya tajam di xxhdpi (A02 = 300dpi ~ xhdpi)
                   const val ICON_SIZE = 96
               }
 
               override fun onCreate() {
                   super.onCreate()
                   createChannel()
-                  // Langsung startForeground dengan icon default dulu
-                  startForeground(NOTIF_ID, buildNotification(makeIcon("...")))
+                  startForeground(NOTIF_ID, buildNotification(makeIcon("--")))
                   active = true
                   isRunning = true
                   lastRxBytes = TrafficStats.getTotalRxBytes()
@@ -244,66 +243,52 @@ jobs:
                   val now = System.currentTimeMillis()
                   val rx = TrafficStats.getTotalRxBytes()
                   val dt = (now - lastTime) / 1000.0
-
                   if (lastRxBytes > 0 && dt > 0) {
                       val bps = (rx - lastRxBytes) / dt
-                      val label = formatSpeed(bps)
-                      // Update notification dengan icon baru
                       val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                      nm.notify(NOTIF_ID, buildNotification(makeIcon(label)))
+                      nm.notify(NOTIF_ID, buildNotification(makeIcon(formatSpeed(bps))))
                   }
-
                   lastRxBytes = rx
                   lastTime = now
               }
 
               /**
-               * Generate bitmap on-the-fly berisi teks kecepatan.
-               * Teknik sama persis kayak ISM tapi tanpa pre-baked 1000 PNG —
-               * kita draw langsung ke Canvas tiap detik.
+               * SINGLE LINE icon generator.
                *
-               * Layout 2 baris:
-               *   "123"   ← angka besar
-               *   "KB/s"  ← unit kecil
+               * Layout: 1 baris center, e.g. "123K" atau "1.2M"
+               * Font di-auto-fit supaya selalu muat di dalam ICON_SIZE.
+               *
+               * Auto-fit logic:
+               *   - Mulai dari textSize = ICON_SIZE * 0.55f (gede)
+               *   - Ukur lebar teks pakai paint.measureText()
+               *   - Kalau lebih lebar dari bitmap, scale down proporsional
+               *   - Hasilnya: teks selalu sekenceng mungkin tanpa clipper
                */
               private fun makeIcon(label: String): Icon {
                   val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
-                  // Background transparan
                   canvas.drawColor(Color.TRANSPARENT)
 
+                  val maxWidth = ICON_SIZE * 0.92f   // 92% lebar bitmap, sisain sedikit padding
+                  val startSize = ICON_SIZE * 0.55f  // starting textSize
+
+                  // Auto-fit: scale textSize sampai teks muat
+                  paint.textSize = startSize
+                  val measured = paint.measureText(label)
+                  if (measured > maxWidth) {
+                      paint.textSize = startSize * (maxWidth / measured)
+                  }
+
+                  // Vertical center: pakai font metrics supaya presisi
+                  val bounds = Rect()
+                  paint.getTextBounds(label, 0, label.length, bounds)
                   val cx = ICON_SIZE / 2f
-                  val cy = ICON_SIZE / 2f
+                  // Baseline y: center bitmap + setengah tinggi teks
+                  val cy = (ICON_SIZE / 2f) + (bounds.height() / 2f)
 
-                  // Parse label: pisah angka dan unit
-                  // label bisa: "123K", "1.2M", "45B", "..."
-                  val (num, unit) = splitLabel(label)
+                  canvas.drawText(label, cx, cy, paint)
 
-                  // Gambar angka - font besar
-                  paint.textSize = ICON_SIZE * 0.42f
-                  canvas.drawText(num, cx, cy * 0.95f, paint)
-
-                  // Gambar unit - font kecil
-                  paint.textSize = ICON_SIZE * 0.24f
-                  canvas.drawText(unit, cx, cy * 1.55f, paint)
-
-                  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      Icon.createWithBitmap(bmp)
-                  } else {
-                      // Fallback API < 23: pakai drawable resource biasa
-                      // (harusnya ga sampe sini karena minSdk 23)
-                      Icon.createWithBitmap(bmp)
-                  }
-              }
-
-              private fun splitLabel(label: String): Pair<String, String> {
-                  return when {
-                      label == "..." -> Pair("--", "KB/s")
-                      label.endsWith("M") -> Pair(label.dropLast(1), "MB/s")
-                      label.endsWith("K") -> Pair(label.dropLast(1), "KB/s")
-                      label.endsWith("B") -> Pair(label.dropLast(1), "B/s")
-                      else -> Pair(label, "")
-                  }
+                  return Icon.createWithBitmap(bmp)
               }
 
               private fun formatSpeed(bps: Double): String = when {
@@ -318,26 +303,15 @@ jobs:
                       Intent(this, MainActivity::class.java),
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                   )
-
-                  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      Notification.Builder(this, CHANNEL_ID)
-                          .setSmallIcon(icon)
-                          .setContentTitle(getString(R.string.notif_title))
-                          .setContentText("")
-                          .setContentIntent(pi)
-                          .setOngoing(true)
-                          .setOnlyAlertOnce(true)
-                          .setVisibility(Notification.VISIBILITY_PUBLIC)
-                          .build()
-                  } else {
-                      @Suppress("DEPRECATION")
-                      Notification.Builder(this)
-                          .setSmallIcon(android.R.drawable.ic_menu_manage)
-                          .setContentTitle(getString(R.string.notif_title))
-                          .setContentIntent(pi)
-                          .setOngoing(true)
-                          .build()
-                  }
+                  return Notification.Builder(this, CHANNEL_ID)
+                      .setSmallIcon(icon)
+                      .setContentTitle(getString(R.string.notif_title))
+                      .setContentText("")
+                      .setContentIntent(pi)
+                      .setOngoing(true)
+                      .setOnlyAlertOnce(true)
+                      .setVisibility(Notification.VISIBILITY_PUBLIC)
+                      .build()
               }
 
               private fun createChannel() {
@@ -347,9 +321,7 @@ jobs:
                           getString(R.string.notif_channel),
                           NotificationManager.IMPORTANCE_LOW
                       ).apply {
-                          description = "Download speed indicator"
                           setShowBadge(false)
-                          // Supaya ga bunyi/vibrate tiap update
                           enableVibration(false)
                           enableLights(false)
                       }
@@ -358,10 +330,8 @@ jobs:
                   }
               }
 
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  // Kalau service di-restart sama sistem, langsung jalan lagi
-                  return START_STICKY
-              }
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+                  START_STICKY
 
               override fun onDestroy() {
                   super.onDestroy()
@@ -396,8 +366,8 @@ jobs:
                   applicationId "com.freestyle.networkindicator"
                   minSdk 23
                   targetSdk 34
-                  versionCode 4
-                  versionName "4.0"
+                  versionCode 5
+                  versionName "4.1"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -441,5 +411,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NSI-v4-debug
+          name: NSI-v4.1-debug
           path: app/build/outputs/apk/debug/*.apk
