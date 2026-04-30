@@ -98,11 +98,11 @@ jobs:
           }
           EOF
           
-          # 4. LongPressKillService.kt (DIPERBAIKI: ditambah onAccessibilityEvent)
+          # 4. LongPressKillService.kt (DIPERBAIKI: import AccessibilityEvent yang benar)
           cat > app/src/main/java/com/freestyle/longpresskill/LongPressKillService.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.accessibilityservice.AccessibilityService
-          import android.accessibilityservice.AccessibilityEvent
+          import android.view.accessibility.AccessibilityEvent
           import android.app.ActivityManager
           import android.content.Context
           import android.os.Handler
