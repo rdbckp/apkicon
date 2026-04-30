@@ -1,4 +1,4 @@
-name: Build APK - Network Indicator (Overlay)
+name: Build APK - NSI - Network Indicator (Overlay)
 
 on:
   workflow_dispatch:
