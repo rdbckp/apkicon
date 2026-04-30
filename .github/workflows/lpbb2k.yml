@@ -1,19 +1,19 @@
-name: Build APK - LongPressKill Final Fix
+name: 1 - Prepare Project
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  prepare:
     runs-on: ubuntu-latest
     steps:
-      - name: Create Project Structure
+      - name: Create Android Project Structure
         run: |
           mkdir -p app/src/main/java/com/freestyle/longpresskill
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/values
           
-          # 1. Resource Strings
+          # 1. strings.xml
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -22,11 +22,10 @@ jobs:
           </resources>
           EOF
           
-          # 2. Android Manifest
+          # 2. AndroidManifest.xml (tanpa package attribute biar tidak deprecated warning)
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.freestyle.longpresskill">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
               <application
                   android:allowBackup="true"
@@ -56,7 +55,7 @@ jobs:
           </manifest>
           EOF
           
-          # 3. MainActivity
+          # 3. MainActivity.kt
           cat > app/src/main/java/com/freestyle/longpresskill/MainActivity.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.os.Bundle
@@ -99,7 +98,7 @@ jobs:
           }
           EOF
           
-          # 4. LongPressKill Service
+          # 4. LongPressKillService.kt
           cat > app/src/main/java/com/freestyle/longpresskill/LongPressKillService.kt << 'EOF'
           package com.freestyle.longpresskill
           import android.accessibilityservice.AccessibilityService
@@ -142,7 +141,7 @@ jobs:
           }
           EOF
           
-          # 5. Accessibility Config
+          # 5. accessibility_service_config.xml
           cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -153,8 +152,8 @@ jobs:
               android:description="@string/accessibility_desc"
               android:notificationTimeout="100" />
           EOF
-
-          # 6. Gradle Build Files
+          
+          # 6. Root build.gradle
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -165,7 +164,8 @@ jobs:
           }
           allprojects { repositories { google(); mavenCentral() } }
           EOF
-
+          
+          # 7. app/build.gradle (DIPERBAIKI dengan compileOptions dan kotlinOptions)
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -177,6 +177,13 @@ jobs:
                   targetSdk 34
                   versionCode 1
                   versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
               }
           }
           dependencies { implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0" }
@@ -194,27 +201,21 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK Platform 34 and Build Tools
+      - name: Install Build Tools & Platform 34
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Generate Gradle Wrapper (using compatible Gradle 8.1.1)
+      - name: Generate Gradle Wrapper (Gradle 8.1.1)
         run: |
-          # Download Gradle 8.1.1 binary (compatible with AGP 8.1.1)
           wget https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
           unzip -q gradle-8.1.1-bin.zip
-          # Generate wrapper using this specific Gradle version
           ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
-          # Clean up downloaded Gradle (optional)
           rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
 
-      - name: Build APK
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-
-      - name: Upload Result
+      - name: Upload entire project as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LPK-Final-Build
-          path: app/build/outputs/apk/debug/*.apk
+          name: android-project-source
+          path: |
+            .
+            !gradle-8.1.1-bin.zip
