@@ -143,6 +143,14 @@ jobs:
           }
           EOF
           
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">Long Press Kill</string>
+              <string name="accessibility_desc">Long press BACK button to force kill current app</string>
+          </resources>
+          EOF
+
           cat > app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -151,15 +159,8 @@ jobs:
               android:accessibilityFlags="flagReportViewIds"
               android:canPerformGestures="true"
               android:canRetrieveWindowContent="true"
-              android:description="Long press BACK button to force kill current app"
+              android:description="@string/accessibility_desc"
               android:notificationTimeout="100" />
-          EOF
-          
-          cat > app/src/main/res/values/strings.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">Long Press Kill</string>
-          </resources>
           EOF
 
           cat > app/build.gradle << 'EOF'
