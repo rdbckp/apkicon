@@ -171,7 +171,7 @@ jobs:
           }
           EOF
 
-          # 6. SpeedService.kt - SINGLE LINE icon
+          # 6. SpeedService.kt - SINGLE LINE icon (FONT DIPERBESAR)
           cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -204,7 +204,6 @@ jobs:
 
               private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                   color = Color.WHITE
-                  // sans-serif-condensed supaya muat lebih lebar di icon kecil
                   typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
                   textAlign = Paint.Align.CENTER
               }
@@ -214,7 +213,6 @@ jobs:
                       private set
                   const val NOTIF_ID = 1
                   const val CHANNEL_ID = "nsi_speed"
-                  // 96x96 supaya tajam di xxhdpi (A02 = 300dpi ~ xhdpi)
                   const val ICON_SIZE = 96
               }
 
@@ -253,37 +251,28 @@ jobs:
               }
 
               /**
-               * SINGLE LINE icon generator.
-               *
-               * Layout: 1 baris center, e.g. "123K" atau "1.2M"
-               * Font di-auto-fit supaya selalu muat di dalam ICON_SIZE.
-               *
-               * Auto-fit logic:
-               *   - Mulai dari textSize = ICON_SIZE * 0.55f (gede)
-               *   - Ukur lebar teks pakai paint.measureText()
-               *   - Kalau lebih lebar dari bitmap, scale down proporsional
-               *   - Hasilnya: teks selalu sekenceng mungkin tanpa clipper
+               * SINGLE LINE icon generator dengan font lebih besar.
+               * - maxWidth diperlebar jadi 96% dari lebar icon
+               * - startSize dinaikkan jadi 85% ukuran icon
+               * Hasil akhir teks akan memenuhi hampir seluruh area icon.
                */
               private fun makeIcon(label: String): Icon {
                   val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
                   canvas.drawColor(Color.TRANSPARENT)
 
-                  val maxWidth = ICON_SIZE * 0.92f   // 92% lebar bitmap, sisain sedikit padding
-                  val startSize = ICON_SIZE * 0.55f  // starting textSize
+                  val maxWidth = ICON_SIZE * 0.96f   // lebih lebar (sebelumnya 0.92)
+                  val startSize = ICON_SIZE * 0.85f  // lebih besar (sebelumnya 0.55)
 
-                  // Auto-fit: scale textSize sampai teks muat
                   paint.textSize = startSize
                   val measured = paint.measureText(label)
                   if (measured > maxWidth) {
                       paint.textSize = startSize * (maxWidth / measured)
                   }
 
-                  // Vertical center: pakai font metrics supaya presisi
                   val bounds = Rect()
                   paint.getTextBounds(label, 0, label.length, bounds)
                   val cx = ICON_SIZE / 2f
-                  // Baseline y: center bitmap + setengah tinggi teks
                   val cy = (ICON_SIZE / 2f) + (bounds.height() / 2f)
 
                   canvas.drawText(label, cx, cy, paint)
