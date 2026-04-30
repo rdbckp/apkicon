@@ -102,7 +102,7 @@ jobs:
           }
           EOF
 
-          # 4. build.gradle
+          # 4. build.gradle (root)
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -110,11 +110,31 @@ jobs:
           }
           allprojects { repositories { google(); mavenCentral() } }
           EOF
+
+          # 5. app/build.gradle — FIXED: tambah compileOptions & kotlinOptions biar Java & Kotlin sama-sama target JVM 17
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
-          android { namespace 'com.freestyle.networkindicator'; compileSdk 34; defaultConfig { applicationId "com.freestyle.networkindicator"; minSdk 23; targetSdk 34; versionCode 8; versionName "4.6" } }
+          android {
+              namespace 'com.freestyle.networkindicator'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.freestyle.networkindicator"
+                  minSdk 23
+                  targetSdk 34
+                  versionCode 8
+                  versionName "4.6"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
           dependencies { implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0" }
           EOF
+
           echo "include ':app'" > settings.gradle
 
       - name: Build APK
