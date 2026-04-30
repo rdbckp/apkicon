@@ -1,4 +1,4 @@
-name: Build APK - NSI v4.1 - Single Line Icon
+name: Build APK - NSI v4.2 - Stable Big Font
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="app_name">NSI</string>
+              <string name="app_name">NSI v4.2</string>
               <string name="notif_channel">Network Speed</string>
               <string name="notif_title">Network Speed Indicator</string>
           </resources>
@@ -36,12 +36,10 @@ jobs:
           # 3. AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:tools="http://schemas.android.com/tools">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -50,8 +48,7 @@ jobs:
                   android:allowBackup="true"
                   android:icon="@android:drawable/ic_menu_manage"
                   android:label="@string/app_name"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar"
-                  tools:ignore="UnusedAttribute">
+                  android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar">
 
                   <activity
                       android:name=".MainActivity"
@@ -73,7 +70,6 @@ jobs:
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
-                          <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                       </intent-filter>
                   </receiver>
               </application>
@@ -109,12 +105,12 @@ jobs:
                   }
 
                   val startBtn = Button(this).apply {
-                      text = "Mulai"
+                      text = "Mulai Service"
                       setOnClickListener { startSpeedService(); updateStatus() }
                   }
 
                   val stopBtn = Button(this).apply {
-                      text = "Hentikan"
+                      text = "Hentikan Service"
                       setOnClickListener {
                           stopService(Intent(this@MainActivity, SpeedService::class.java))
                           updateStatus()
@@ -143,7 +139,7 @@ jobs:
 
               private fun updateStatus() {
                   statusText.text = if (SpeedService.isRunning)
-                      "Status: AKTIF ✅\n\nSpeed icon 1 baris di notification area SB."
+                      "Status: AKTIF ✅\n\nIndikator kecepatan besar (setara jam SB) aktif."
                   else
                       "Status: MATI ❌"
               }
@@ -171,28 +167,16 @@ jobs:
           }
           EOF
 
-          # 6. SpeedService.kt - SINGLE LINE icon (FONT MAKSIMAL sebesar jam)
+          # 6. SpeedService.kt - STABLE BIG FONT logic
           cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
-          import android.app.Notification
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.PendingIntent
-          import android.app.Service
+          import android.app.*
           import android.content.Intent
-          import android.graphics.Bitmap
-          import android.graphics.Canvas
-          import android.graphics.Color
-          import android.graphics.Paint
-          import android.graphics.Rect
-          import android.graphics.Typeface
+          import android.graphics.*
           import android.graphics.drawable.Icon
           import android.net.TrafficStats
-          import android.os.Build
-          import android.os.Handler
-          import android.os.IBinder
-          import android.os.Looper
+          import android.os.*
           import java.util.Locale
 
           class SpeedService : Service() {
@@ -204,7 +188,8 @@ jobs:
 
               private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                   color = Color.WHITE
-                  typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+                  // Pakai SANS_SERIF BOLD supaya mirip font jam sistem
+                  typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                   textAlign = Paint.Align.CENTER
               }
 
@@ -212,8 +197,8 @@ jobs:
                   var isRunning = false
                       private set
                   const val NOTIF_ID = 1
-                  const val CHANNEL_ID = "nsi_speed"
-                  const val ICON_SIZE = 96
+                  const val CHANNEL_ID = "nsi_speed_v4"
+                  const val ICON_SIZE = 96 // Resolusi tinggi untuk status bar
               }
 
               override fun onCreate() {
@@ -251,32 +236,23 @@ jobs:
               }
 
               /**
-               * SINGLE LINE icon generator dengan font sebesar mungkin.
-               * - maxWidth = 98% dari lebar icon (hampir penuh)
-               * - startSize = 100% dari tinggi icon (maksimal)
-               * - Auto-fit akan mengecilkan font jika teks terlalu lebar,
-               *   namun tetap berusaha sebesar mungkin.
+               * STABLE BIG FONT generator.
+               * Tinggi huruf dipaksa setara dengan jam sistem (sekitar 70% canvas).
+               * Tidak ada auto-scaling horizontal agar tinggi tetap konsisten.
                */
               private fun makeIcon(label: String): Icon {
                   val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
-                  canvas.drawColor(Color.TRANSPARENT)
+                  
+                  // TextSize di-set fix supaya tingginya setara tinggi jam (stabil)
+                  // 0.7f (70% dari 96px = ~67px) adalah standar yang pas buat font besar di SB
+                  paint.textSize = ICON_SIZE * 0.72f 
 
-                  val maxWidth = ICON_SIZE * 0.98f   // lebar maksimal 98% icon
-                  val startSize = ICON_SIZE.toFloat() // mulai dari 100% tinggi icon
+                  // Hitung posisi Y supaya benar-benar Center secara visual (Baseline correction)
+                  val xPos = ICON_SIZE / 2f
+                  val yPos = (ICON_SIZE / 2f) - ((paint.descent() + paint.ascent()) / 2f)
 
-                  paint.textSize = startSize
-                  val measured = paint.measureText(label)
-                  if (measured > maxWidth) {
-                      paint.textSize = startSize * (maxWidth / measured)
-                  }
-
-                  val bounds = Rect()
-                  paint.getTextBounds(label, 0, label.length, bounds)
-                  val cx = ICON_SIZE / 2f
-                  val cy = (ICON_SIZE / 2f) + (bounds.height() / 2f)
-
-                  canvas.drawText(label, cx, cy, paint)
+                  canvas.drawText(label, xPos, yPos, paint)
 
                   return Icon.createWithBitmap(bmp)
               }
@@ -295,8 +271,7 @@ jobs:
                   )
                   return Notification.Builder(this, CHANNEL_ID)
                       .setSmallIcon(icon)
-                      .setContentTitle(getString(R.string.notif_title))
-                      .setContentText("")
+                      .setContentTitle("Speed")
                       .setContentIntent(pi)
                       .setOngoing(true)
                       .setOnlyAlertOnce(true)
@@ -320,16 +295,13 @@ jobs:
                   }
               }
 
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
-                  START_STICKY
-
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
               override fun onDestroy() {
-                  super.onDestroy()
                   active = false
                   isRunning = false
                   handler.removeCallbacksAndMessages(null)
+                  super.onDestroy()
               }
-
               override fun onBind(intent: Intent?): IBinder? = null
           }
           EOF
@@ -356,8 +328,8 @@ jobs:
                   applicationId "com.freestyle.networkindicator"
                   minSdk 23
                   targetSdk 34
-                  versionCode 5
-                  versionName "4.1"
+                  versionCode 6
+                  versionName "4.2"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -371,7 +343,7 @@ jobs:
           EOF
 
           echo "include ':app'" > settings.gradle
-          echo "android.useAndroidX=false" > gradle.properties
+          echo "android.useAndroidX=true" > gradle.properties
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -382,17 +354,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK Platform 34 & Build Tools
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Generate Gradle Wrapper
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
-          unzip -q gradle-8.1.1-bin.zip
-          ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
-          rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
-
       - name: Build APK
         run: |
           chmod +x gradlew
@@ -401,5 +362,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NSI-v4.1-debug
+          name: NSI-v4.2-StableBigFont
           path: app/build/outputs/apk/debug/*.apk
