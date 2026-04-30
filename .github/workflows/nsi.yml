@@ -1,4 +1,4 @@
-name: Build APK - NSI v3 - Status Bar Area (Precise)
+name: Build APK - NSI v4 - Notification Icon Bitmap
 
 on:
   workflow_dispatch:
@@ -11,26 +11,34 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/freestyle/networkindicator
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
 
           # 1. strings.xml
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="app_name">Network Indicator</string>
-              <string name="start_service">Mulai</string>
-              <string name="stop_service">Hentikan</string>
-              <string name="notification_title">Network Indicator</string>
-              <string name="notification_text">Download speed aktif</string>
+              <string name="app_name">NSI</string>
+              <string name="notif_channel">Network Speed</string>
+              <string name="notif_title">Network Speed Indicator</string>
           </resources>
           EOF
 
-          # 2. AndroidManifest.xml
+          # 2. ic_placeholder.xml - dummy icon (transparent 1x1, buat fallback)
+          cat > app/src/main/res/drawable/ic_placeholder.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <size android:width="1dp" android:height="1dp" />
+              <solid android:color="@android:color/transparent" />
+          </shape>
+          EOF
+
+          # 3. AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:tools="http://schemas.android.com/tools">
 
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -45,7 +53,8 @@ jobs:
                   android:theme="@android:style/Theme.DeviceDefault.Light.DarkActionBar"
                   tools:ignore="UnusedAttribute">
 
-                  <activity android:name=".MainActivity"
+                  <activity
+                      android:name=".MainActivity"
                       android:exported="true"
                       android:label="@string/app_name">
                       <intent-filter>
@@ -55,24 +64,23 @@ jobs:
                   </activity>
 
                   <service
-                      android:name=".OverlayService"
+                      android:name=".SpeedService"
                       android:exported="false"
                       android:foregroundServiceType="dataSync" />
 
-                  <!-- Auto-start on boot -->
                   <receiver
                       android:name=".BootReceiver"
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
-                          <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                       </intent-filter>
                   </receiver>
               </application>
           </manifest>
           EOF
 
-          # 3. MainActivity.kt
+          # 4. MainActivity.kt - simpel, cuma kontrol start/stop
           cat > app/src/main/java/com/freestyle/networkindicator/MainActivity.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -80,17 +88,12 @@ jobs:
           import android.content.Intent
           import android.os.Build
           import android.os.Bundle
-          import android.provider.Settings
-          import android.net.Uri
           import android.widget.Button
           import android.widget.LinearLayout
           import android.widget.TextView
-          import android.widget.Toast
 
           class MainActivity : Activity() {
               private lateinit var statusText: TextView
-              private lateinit var startButton: Button
-              private lateinit var stopButton: Button
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -105,40 +108,22 @@ jobs:
                       setPadding(0, 0, 0, 40)
                   }
 
-                  val permButton = Button(this).apply {
-                      text = "Izin Overlay"
-                      setOnClickListener {
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                              startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                  Uri.parse("package:$packageName")))
-                          }
-                      }
+                  val startBtn = Button(this).apply {
+                      text = "Mulai"
+                      setOnClickListener { startSpeedService(); updateStatus() }
                   }
 
-                  startButton = Button(this).apply {
-                      text = getString(R.string.start_service)
+                  val stopBtn = Button(this).apply {
+                      text = "Hentikan"
                       setOnClickListener {
-                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this@MainActivity)) {
-                              Toast.makeText(this@MainActivity, "Kasih izin overlay dulu!", Toast.LENGTH_SHORT).show()
-                              return@setOnClickListener
-                          }
-                          startService(Intent(this@MainActivity, OverlayService::class.java))
-                          updateStatus()
-                      }
-                  }
-
-                  stopButton = Button(this).apply {
-                      text = getString(R.string.stop_service)
-                      setOnClickListener {
-                          stopService(Intent(this@MainActivity, OverlayService::class.java))
+                          stopService(Intent(this@MainActivity, SpeedService::class.java))
                           updateStatus()
                       }
                   }
 
                   layout.addView(statusText)
-                  layout.addView(permButton)
-                  layout.addView(startButton)
-                  layout.addView(stopButton)
+                  layout.addView(startBtn)
+                  layout.addView(stopBtn)
                   setContentView(layout)
               }
 
@@ -147,20 +132,25 @@ jobs:
                   updateStatus()
               }
 
+              private fun startSpeedService() {
+                  val intent = Intent(this, SpeedService::class.java)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      startForegroundService(intent)
+                  } else {
+                      startService(intent)
+                  }
+              }
+
               private fun updateStatus() {
-                  val running = OverlayService.isRunning
-                  val hasPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                      Settings.canDrawOverlays(this) else true
-                  statusText.text = "Status: ${if (running) "AKTIF ✅" else "MATI ❌"}\n" +
-                      "Overlay izin: ${if (hasPerm) "✅" else "❌ (tap Izin Overlay)"}\n\n" +
-                      "App auto-start saat boot."
-                  startButton.isEnabled = !running
-                  stopButton.isEnabled = running
+                  statusText.text = if (SpeedService.isRunning)
+                      "Status: AKTIF ✅\n\nSpeed muncul di notification icon area SB."
+                  else
+                      "Status: MATI ❌\n\nTeknik: bitmap Canvas di-generate on-the-fly,\ndi-set sebagai smallIcon foreground notification."
               }
           }
           EOF
 
-          # 4. BootReceiver.kt
+          # 5. BootReceiver.kt
           cat > app/src/main/java/com/freestyle/networkindicator/BootReceiver.kt << 'EOF'
           package com.freestyle.networkindicator
 
@@ -171,181 +161,220 @@ jobs:
 
           class BootReceiver : BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
-                  if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-                      intent.action == "android.intent.action.LOCKED_BOOT_COMPLETED") {
-                      val serviceIntent = Intent(context, OverlayService::class.java)
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          context.startForegroundService(serviceIntent)
-                      } else {
-                          context.startService(serviceIntent)
-                      }
+                  val i = Intent(context, SpeedService::class.java)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      context.startForegroundService(i)
+                  } else {
+                      context.startService(i)
                   }
               }
           }
           EOF
 
-          # 5. OverlayService.kt
-          # Data presisi dari A02:
-          #   StatusBar height = 45px (dari dumpsys window)
-          #   Density = 300dpi → 1dp = 1.875px
-          #   Layar = 720x1600px
-          #   Strategi: y = -45 + FLAG_LAYOUT_NO_LIMITS → masuk area SB
-          #   x = 150px dari kanan → kiri dari area clock/battery Samsung
-          cat > app/src/main/java/com/freestyle/networkindicator/OverlayService.kt << 'EOF'
+          # 6. SpeedService.kt - CORE: generate bitmap speed icon tiap detik
+          cat > app/src/main/java/com/freestyle/networkindicator/SpeedService.kt << 'EOF'
           package com.freestyle.networkindicator
 
+          import android.app.Notification
           import android.app.NotificationChannel
           import android.app.NotificationManager
           import android.app.PendingIntent
           import android.app.Service
           import android.content.Intent
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
           import android.graphics.Color
-          import android.graphics.PixelFormat
+          import android.graphics.Paint
           import android.graphics.Typeface
+          import android.graphics.drawable.Icon
           import android.net.TrafficStats
           import android.os.Build
           import android.os.Handler
           import android.os.IBinder
           import android.os.Looper
-          import android.view.Gravity
-          import android.view.WindowManager
-          import android.widget.TextView
-          import androidx.core.app.NotificationCompat
           import java.util.Locale
 
-          class OverlayService : Service() {
+          class SpeedService : Service() {
 
-              private lateinit var windowManager: WindowManager
-              private lateinit var overlayView: TextView
               private val handler = Handler(Looper.getMainLooper())
-              private var _serviceActive = false
+              private var active = false
               private var lastRxBytes = 0L
-              private var lastUpdateTime = 0L
+              private var lastTime = 0L
+
+              // Paint untuk gambar teks di bitmap - dibuat sekali, reuse
+              private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                  color = Color.WHITE
+                  typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+                  textAlign = Paint.Align.CENTER
+              }
 
               companion object {
                   var isRunning = false
                       private set
-
-                  // A02 data: SB height = 45px, density = 300dpi
-                  const val SB_HEIGHT_PX = 45
-                  // Offset dari kanan: area clock+battery+wifi Samsung A02
-                  // Clock Samsung ~72px, battery ~30px, wifi+signal ~48px = ~150px total
-                  // Tambah sedikit padding → 160px
-                  const val OFFSET_FROM_RIGHT_PX = 160
+                  const val NOTIF_ID = 1
+                  const val CHANNEL_ID = "nsi_speed"
+                  // Ukuran bitmap icon: 96x96px
+                  // ISM pakai 48x48 (hdpi), tapi kita 96x96 supaya tajam di xxhdpi
+                  const val ICON_SIZE = 96
               }
 
               override fun onCreate() {
                   super.onCreate()
-                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-                  startForegroundNotification()
-                  createOverlayView()
-                  _serviceActive = true
+                  createChannel()
+                  // Langsung startForeground dengan icon default dulu
+                  startForeground(NOTIF_ID, buildNotification(makeIcon("...")))
+                  active = true
                   isRunning = true
                   lastRxBytes = TrafficStats.getTotalRxBytes()
-                  lastUpdateTime = System.currentTimeMillis()
-                  startUpdater()
+                  lastTime = System.currentTimeMillis()
+                  scheduleUpdate()
               }
 
-              private fun createOverlayView() {
-                  overlayView = TextView(this).apply {
-                      text = "0K"
-                      setTextColor(Color.WHITE)
-                      setBackgroundColor(Color.TRANSPARENT)
-                      setPadding(0, 0, 4, 0)
-                      // 11sp → 11 * (300/160) = ~20.6px — setara font angka baterai Samsung
-                      textSize = 11f
-                      typeface = Typeface.create("sans-serif-condensed", Typeface.NORMAL)
-                  }
-
-                  val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      SB_HEIGHT_PX,  // tinggi pas setinggi SB
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                      else
-                          @Suppress("DEPRECATION")
-                          WindowManager.LayoutParams.TYPE_PHONE,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                              WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                              WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                      PixelFormat.TRANSLUCENT
-                  ).apply {
-                      gravity = Gravity.END or Gravity.TOP
-                      x = OFFSET_FROM_RIGHT_PX
-                      // y = -SB_HEIGHT_PX → masuk area SB karena FLAG_LAYOUT_NO_LIMITS
-                      y = -SB_HEIGHT_PX
-                  }
-
-                  windowManager.addView(overlayView, params)
-              }
-
-              private fun startForegroundNotification() {
-                  val channelId = "nsi_channel"
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(
-                          channelId, "Network Indicator", NotificationManager.IMPORTANCE_LOW
-                      )
-                      getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-                  }
-                  val pi = PendingIntent.getActivity(
-                      this, 0, Intent(this, MainActivity::class.java),
-                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                  )
-                  startForeground(1, NotificationCompat.Builder(this, channelId)
-                      .setContentTitle(getString(R.string.notification_title))
-                      .setContentText(getString(R.string.notification_text))
-                      .setSmallIcon(android.R.drawable.ic_menu_manage)
-                      .setContentIntent(pi)
-                      .setPriority(NotificationCompat.PRIORITY_LOW)
-                      .build())
-              }
-
-              private fun startUpdater() {
-                  val runnable = object : Runnable {
+              private fun scheduleUpdate() {
+                  handler.postDelayed(object : Runnable {
                       override fun run() {
-                          if (!_serviceActive) return
-                          updateSpeed()
+                          if (!active) return
+                          tick()
                           handler.postDelayed(this, 1000)
                       }
-                  }
-                  handler.post(runnable)
+                  }, 1000)
               }
 
-              private fun updateSpeed() {
+              private fun tick() {
                   val now = System.currentTimeMillis()
-                  val currentRx = TrafficStats.getTotalRxBytes()
-                  val deltaTime = (now - lastUpdateTime) / 1000.0
-                  if (lastRxBytes > 0 && deltaTime > 0) {
-                      val bps = (currentRx - lastRxBytes) / deltaTime
-                      overlayView.text = formatSpeed(bps)
+                  val rx = TrafficStats.getTotalRxBytes()
+                  val dt = (now - lastTime) / 1000.0
+
+                  if (lastRxBytes > 0 && dt > 0) {
+                      val bps = (rx - lastRxBytes) / dt
+                      val label = formatSpeed(bps)
+                      // Update notification dengan icon baru
+                      val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                      nm.notify(NOTIF_ID, buildNotification(makeIcon(label)))
                   }
-                  lastRxBytes = currentRx
-                  lastUpdateTime = now
+
+                  lastRxBytes = rx
+                  lastTime = now
               }
 
-              // Format singkat biar muat: "123K", "1.2M", "45B"
+              /**
+               * Generate bitmap on-the-fly berisi teks kecepatan.
+               * Teknik sama persis kayak ISM tapi tanpa pre-baked 1000 PNG —
+               * kita draw langsung ke Canvas tiap detik.
+               *
+               * Layout 2 baris:
+               *   "123"   ← angka besar
+               *   "KB/s"  ← unit kecil
+               */
+              private fun makeIcon(label: String): Icon {
+                  val bmp = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
+                  val canvas = Canvas(bmp)
+                  // Background transparan
+                  canvas.drawColor(Color.TRANSPARENT)
+
+                  val cx = ICON_SIZE / 2f
+                  val cy = ICON_SIZE / 2f
+
+                  // Parse label: pisah angka dan unit
+                  // label bisa: "123K", "1.2M", "45B", "..."
+                  val (num, unit) = splitLabel(label)
+
+                  // Gambar angka - font besar
+                  paint.textSize = ICON_SIZE * 0.42f
+                  canvas.drawText(num, cx, cy * 0.95f, paint)
+
+                  // Gambar unit - font kecil
+                  paint.textSize = ICON_SIZE * 0.24f
+                  canvas.drawText(unit, cx, cy * 1.55f, paint)
+
+                  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      Icon.createWithBitmap(bmp)
+                  } else {
+                      // Fallback API < 23: pakai drawable resource biasa
+                      // (harusnya ga sampe sini karena minSdk 23)
+                      Icon.createWithBitmap(bmp)
+                  }
+              }
+
+              private fun splitLabel(label: String): Pair<String, String> {
+                  return when {
+                      label == "..." -> Pair("--", "KB/s")
+                      label.endsWith("M") -> Pair(label.dropLast(1), "MB/s")
+                      label.endsWith("K") -> Pair(label.dropLast(1), "KB/s")
+                      label.endsWith("B") -> Pair(label.dropLast(1), "B/s")
+                      else -> Pair(label, "")
+                  }
+              }
+
               private fun formatSpeed(bps: Double): String = when {
                   bps >= 1024 * 1024 -> String.format(Locale.US, "%.1fM", bps / (1024 * 1024))
                   bps >= 1024        -> String.format(Locale.US, "%.0fK", bps / 1024)
                   else               -> String.format(Locale.US, "%.0fB", bps)
               }
 
+              private fun buildNotification(icon: Icon): Notification {
+                  val pi = PendingIntent.getActivity(
+                      this, 0,
+                      Intent(this, MainActivity::class.java),
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      Notification.Builder(this, CHANNEL_ID)
+                          .setSmallIcon(icon)
+                          .setContentTitle(getString(R.string.notif_title))
+                          .setContentText("")
+                          .setContentIntent(pi)
+                          .setOngoing(true)
+                          .setOnlyAlertOnce(true)
+                          .setVisibility(Notification.VISIBILITY_PUBLIC)
+                          .build()
+                  } else {
+                      @Suppress("DEPRECATION")
+                      Notification.Builder(this)
+                          .setSmallIcon(android.R.drawable.ic_menu_manage)
+                          .setContentTitle(getString(R.string.notif_title))
+                          .setContentIntent(pi)
+                          .setOngoing(true)
+                          .build()
+                  }
+              }
+
+              private fun createChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val ch = NotificationChannel(
+                          CHANNEL_ID,
+                          getString(R.string.notif_channel),
+                          NotificationManager.IMPORTANCE_LOW
+                      ).apply {
+                          description = "Download speed indicator"
+                          setShowBadge(false)
+                          // Supaya ga bunyi/vibrate tiap update
+                          enableVibration(false)
+                          enableLights(false)
+                      }
+                      (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                          .createNotificationChannel(ch)
+                  }
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  // Kalau service di-restart sama sistem, langsung jalan lagi
+                  return START_STICKY
+              }
+
               override fun onDestroy() {
                   super.onDestroy()
-                  _serviceActive = false
+                  active = false
                   isRunning = false
                   handler.removeCallbacksAndMessages(null)
-                  if (::overlayView.isInitialized) {
-                      try { windowManager.removeView(overlayView) } catch (_: Exception) {}
-                  }
               }
 
               override fun onBind(intent: Intent?): IBinder? = null
           }
           EOF
 
-          # 6. build.gradle (root)
+          # 7. build.gradle root
           cat > build.gradle << 'EOF'
           buildscript {
               repositories { google(); mavenCentral() }
@@ -357,7 +386,7 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # 7. app/build.gradle
+          # 8. app/build.gradle
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
@@ -365,10 +394,10 @@ jobs:
               compileSdk 34
               defaultConfig {
                   applicationId "com.freestyle.networkindicator"
-                  minSdk 21
+                  minSdk 23
                   targetSdk 34
-                  versionCode 3
-                  versionName "3.0"
+                  versionCode 4
+                  versionName "4.0"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -378,12 +407,11 @@ jobs:
           }
           dependencies {
               implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
-              implementation "androidx.core:core-ktx:1.12.0"
           }
           EOF
 
           echo "include ':app'" > settings.gradle
-          echo "android.useAndroidX=true" > gradle.properties
+          echo "android.useAndroidX=false" > gradle.properties
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -398,9 +426,9 @@ jobs:
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Generate Gradle Wrapper (Gradle 8.1.1)
+      - name: Generate Gradle Wrapper
         run: |
-          wget https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
+          wget -q https://services.gradle.org/distributions/gradle-8.1.1-bin.zip
           unzip -q gradle-8.1.1-bin.zip
           ./gradle-8.1.1/bin/gradle wrapper --gradle-version 8.1.1
           rm -rf gradle-8.1.1-bin.zip gradle-8.1.1
@@ -413,5 +441,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NetworkIndicator-v3-debug
+          name: NSI-v4-debug
           path: app/build/outputs/apk/debug/*.apk
