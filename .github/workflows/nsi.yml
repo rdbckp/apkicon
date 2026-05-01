@@ -31,6 +31,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Install ImageMagick
+        run: sudo apt-get install -y imagemagick
+
       - name: Create Project Structure
         env:
           GRAVITY: ${{ github.event.inputs.gravity }}
