@@ -2,15 +2,53 @@ name: Build APK - NSI v4.6 - Overlay Service (Right Top)
 
 on:
   workflow_dispatch:
+    inputs:
+      gravity:
+        description: 'Posisi overlay'
+        required: true
+        default: 'TOP_END'
+        type: choice
+        options:
+          - TOP_END
+          - TOP_START
+          - TOP_CENTER
+          - BOTTOM_END
+          - BOTTOM_START
+          - BOTTOM_CENTER
+          - CENTER
+      offset_y:
+        description: 'Jarak vertikal dari anchor (px)'
+        required: true
+        default: '100'
+        type: string
+      offset_x:
+        description: 'Jarak horizontal dari anchor (px)'
+        required: true
+        default: '0'
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Create Project Structure
+        env:
+          GRAVITY: ${{ github.event.inputs.gravity }}
+          OFFSET_Y: ${{ github.event.inputs.offset_y }}
+          OFFSET_X: ${{ github.event.inputs.offset_x }}
         run: |
           mkdir -p app/src/main/java/com/freestyle/networkindicator
           mkdir -p app/src/main/res/values
+
+          case "$GRAVITY" in
+            TOP_END)       GRAVITY_CODE="Gravity.TOP or Gravity.END" ;;
+            TOP_START)     GRAVITY_CODE="Gravity.TOP or Gravity.START" ;;
+            TOP_CENTER)    GRAVITY_CODE="Gravity.TOP or Gravity.CENTER_HORIZONTAL" ;;
+            BOTTOM_END)    GRAVITY_CODE="Gravity.BOTTOM or Gravity.END" ;;
+            BOTTOM_START)  GRAVITY_CODE="Gravity.BOTTOM or Gravity.START" ;;
+            BOTTOM_CENTER) GRAVITY_CODE="Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL" ;;
+            CENTER)        GRAVITY_CODE="Gravity.CENTER" ;;
+          esac
 
           # 1. AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
@@ -33,7 +71,7 @@ jobs:
           EOF
 
           # 2. OverlayService.kt
-          cat > app/src/main/java/com/freestyle/networkindicator/OverlayService.kt << 'EOF'
+          cat > app/src/main/java/com/freestyle/networkindicator/OverlayService.kt << EOF
           package com.freestyle.networkindicator
           import android.app.Service
           import android.content.Intent
@@ -57,6 +95,7 @@ jobs:
                       setBackgroundColor(Color.parseColor("#80000000"))
                       textSize = 14f
                       setPadding(10, 5, 10, 5)
+                      gravity = Gravity.END
                   }
                   val params = WindowManager.LayoutParams(
                       WindowManager.LayoutParams.WRAP_CONTENT,
@@ -65,8 +104,9 @@ jobs:
                       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                       PixelFormat.TRANSLUCENT
                   ).apply {
-                      gravity = Gravity.TOP or Gravity.END
-                      y = 100
+                      gravity = $GRAVITY_CODE
+                      x = $OFFSET_X
+                      y = $OFFSET_Y
                   }
                   wm.addView(tv, params)
                   updateSpeed()
@@ -75,7 +115,7 @@ jobs:
                   handler.post(object : Runnable {
                       override fun run() {
                           val rx = TrafficStats.getTotalRxBytes() / 1024
-                          tv.text = "${rx % 9999}K/s"
+                          tv.text = "\${rx % 9999}K/s"
                           handler.postDelayed(this, 1000)
                       }
                   })
@@ -111,7 +151,7 @@ jobs:
           allprojects { repositories { google(); mavenCentral() } }
           EOF
 
-          # 5. app/build.gradle — FIXED: tambah compileOptions & kotlinOptions biar Java & Kotlin sama-sama target JVM 17
+          # 5. app/build.gradle
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application'; id 'kotlin-android' }
           android {
