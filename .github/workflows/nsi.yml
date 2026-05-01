@@ -93,7 +93,7 @@ jobs:
                   tv = TextView(this).apply {
                       setTextColor(Color.WHITE)
                       setBackgroundColor(Color.parseColor("#80000000"))
-                      textSize = 14f
+                      textSize = 12f
                       setPadding(10, 5, 10, 5)
                       gravity = Gravity.END
                   }
