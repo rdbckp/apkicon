@@ -1,0 +1,32 @@
+name: Patch vbmeta.img
+
+on:
+  workflow_dispatch: # Biar bisa manual run dari tab Actions
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Patch vbmeta
+        run: |
+          # Kita pake script sederhana buat nge-patch byte-nya langsung
+          # Script ini ngebypass verifikasi dengan ngubah flag di dalam image
+          python3 -c "
+          with open('vbmeta.img', 'rb+') as f:
+              f.seek(123) # Offset standar buat flag AVB
+              f.write(b'\x03') # \x03 = disable verity & verification
+          "
+          
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-vbmeta
+          path: vbmeta.img
