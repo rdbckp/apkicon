@@ -1,0 +1,51 @@
+name: Generate Nisan Vector
+on:
+  workflow_dispatch:
+    inputs:
+      nama_almarhum:
+        description: 'Nama Almarhum/ah'
+        required: true
+        default: 'ELIANTO'
+      bin_binti:
+        description: 'Bin / Binti'
+        required: true
+        default: 'Bin'
+      nama_ayah:
+        description: 'Nama Ayah'
+        required: true
+        default: 'SUCIPTO'
+      tgl_lahir:
+        description: 'Tanggal Lahir'
+        required: true
+        default: '12 - 11 - 1958'
+      tgl_wafat:
+        description: 'Tanggal Wafat'
+        required: true
+        default: '09 - 04 - 2026'
+
+jobs:
+  build-vector:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run Generator
+        env:
+          INPUT_NAMA: ${{ github.event.inputs.nama_almarhum }}
+          INPUT_BIN: ${{ github.event.inputs.bin_binti }}
+          INPUT_AYAH: ${{ github.event.inputs.nama_ayah }}
+          INPUT_LAHIR: ${{ github.event.inputs.tgl_lahir }}
+          INPUT_WAFAT: ${{ github.event.inputs.tgl_wafat }}
+        run: python scripts/generator.py
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hasil-Nisan-SVG
+          path: output/*.svg
