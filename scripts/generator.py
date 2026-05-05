@@ -1,48 +1,34 @@
-import os
-import sys
+import xml.etree.ElementTree as ET
 
-def generate():
-    # 1. Lokasi file yang benar (menggunakan path absolut)
-    base_dir = os.getcwd()
-    template_path = os.path.join(base_dir, 'templates', 'template_nisan.svg')
-    output_dir = os.path.join(base_dir, 'output')
+def update_nisan():
+    # Load file SVG
+    tree = ET.parse('templates/sv.svg')
+    root = tree.getroot()
     
-    # 2. Cek apakah file template ada
-    if not os.path.exists(template_path):
-        print(f"ERROR: File template tidak ditemukan di {template_path}")
-        sys.exit(1)
-
-    # 3. Ambil data dari Environment Variables
+    # Data kamu
     data = {
-        "{{NAMA}}": os.getenv("INPUT_NAMA", "NAMA PEMESAN"),
-        "{{BIN}}": os.getenv("INPUT_BIN", "Bin"),
-        "{{AYAH}}": os.getenv("INPUT_AYAH", "NAMA AYAH"),
-        "{{LAHIR}}": os.getenv("INPUT_LAHIR", "00-00-0000"),
-        "{{WAFAT}}": os.getenv("INPUT_WAFAT", "00-00-2026"),
+        "NAMA_SARIP": "SARIP",
+        "BIN_TEXT": "BIN",
+        "AYAH_TEXT": "H. ANEN",
+        "LAHIR_VAL": "02 – 07 – 1970",
+        "WAFAT_VAL": "28 – 05 – 2025"
     }
 
-    # 4. Baca template
-    with open(template_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    # Fungsi untuk cari teks dan update
+    # Di Corel/Inkscape, teks yang mau diganti harus punya ID atau diisi placeholder
+    # Pastikan di SVG lo, teksnya sudah diisi placeholder: {{NAMA}}, {{BIN}}, dll.
+    for element in root.iter('{http://www.w3.org/2000/svg}text'):
+        text = element.text
+        if text:
+            if "{{NAMA}}" in text: element.text = text.replace("{{NAMA}}", data["NAMA_SARIP"])
+            if "{{BIN}}" in text: element.text = text.replace("{{BIN}}", data["BIN_TEXT"])
+            if "{{AYAH}}" in text: element.text = text.replace("{{AYAH}}", data["AYAH_TEXT"])
+            if "{{LAHIR}}" in text: element.text = text.replace("{{LAHIR}}", data["LAHIR_VAL"])
+            if "{{WAFAT}}" in text: element.text = text.replace("{{WAFAT}}", data["WAFAT_VAL"])
 
-    # Debug: Pastikan text placeholder ada di file
-    if "{{NAMA}}" not in content:
-        print("WARNING: Placeholder {{NAMA}} tidak ditemukan di file SVG!")
-        print("Pastikan kamu save file SVG sebagai 'Plain SVG' dari CorelDraw.")
-
-    # 5. Ganti teks
-    for key, value in data.items():
-        content = content.replace(key, value)
-
-    # 6. Simpan hasil
-    os.makedirs(output_dir, exist_ok=True)
-    output_filename = f"nisan_{data['{{NAMA}}'].replace(' ', '_')}.svg"
-    output_path = os.path.join(output_dir, output_filename)
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    
-    print(f"SUCCESS: File berhasil dibuat di {output_path}")
+    # Simpan hasil
+    tree.write('output/nisan_SARIP.svg', encoding='utf-8', xml_declaration=True)
+    print("File nisan_SARIP.svg berhasil dibuat!")
 
 if __name__ == "__main__":
-    generate()
+    update_nisan()
