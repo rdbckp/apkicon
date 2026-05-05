@@ -1,28 +1,48 @@
 import os
+import sys
 
-# Data input dari Environment Variable GitHub Actions
-data = {
-    "{{NAMA}}": os.getenv("INPUT_NAMA", "NAMA PEMESAN"),
-    "{{BIN}}": os.getenv("INPUT_BIN", "Bin"),
-    "{{AYAH}}": os.getenv("INPUT_AYAH", "NAMA AYAH"),
-    "{{LAHIR}}": os.getenv("INPUT_LAHIR", "00-00-0000"),
-    "{{WAFAT}}": os.getenv("INPUT_WAFAT", "00-00-2026"),
-}
+def generate():
+    # 1. Lokasi file yang benar (menggunakan path absolut)
+    base_dir = os.getcwd()
+    template_path = os.path.join(base_dir, 'templates', 'template_nisan.svg')
+    output_dir = os.path.join(base_dir, 'output')
+    
+    # 2. Cek apakah file template ada
+    if not os.path.exists(template_path):
+        print(f"ERROR: File template tidak ditemukan di {template_path}")
+        sys.exit(1)
 
-template_path = 'templates/template_nisan.svg'
-output_path = f"output/nisan_{data['{{NAMA}}'].replace(' ', '_')}.svg"
+    # 3. Ambil data dari Environment Variables
+    data = {
+        "{{NAMA}}": os.getenv("INPUT_NAMA", "NAMA PEMESAN"),
+        "{{BIN}}": os.getenv("INPUT_BIN", "Bin"),
+        "{{AYAH}}": os.getenv("INPUT_AYAH", "NAMA AYAH"),
+        "{{LAHIR}}": os.getenv("INPUT_LAHIR", "00-00-0000"),
+        "{{WAFAT}}": os.getenv("INPUT_WAFAT", "00-00-2026"),
+    }
 
-# Buat folder output jika belum ada
-os.makedirs('output', exist_ok=True)
+    # 4. Baca template
+    with open(template_path, 'r', encoding='utf-8') as f:
+        content = f.read()
 
-with open(template_path, 'r', encoding='utf-8') as f:
-    content = f.read()
+    # Debug: Pastikan text placeholder ada di file
+    if "{{NAMA}}" not in content:
+        print("WARNING: Placeholder {{NAMA}} tidak ditemukan di file SVG!")
+        print("Pastikan kamu save file SVG sebagai 'Plain SVG' dari CorelDraw.")
 
-# Proses penggantian teks
-for key, value in data.items():
-    content = content.replace(key, value)
+    # 5. Ganti teks
+    for key, value in data.items():
+        content = content.replace(key, value)
 
-with open(output_path, 'w', encoding='utf-8') as f:
-    f.write(content)
+    # 6. Simpan hasil
+    os.makedirs(output_dir, exist_ok=True)
+    output_filename = f"nisan_{data['{{NAMA}}'].replace(' ', '_')}.svg"
+    output_path = os.path.join(output_dir, output_filename)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    print(f"SUCCESS: File berhasil dibuat di {output_path}")
 
-print(f"✅ Sukses! File dibuat di: {output_path}")
+if __name__ == "__main__":
+    generate()
