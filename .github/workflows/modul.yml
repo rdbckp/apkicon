@@ -22,15 +22,26 @@ jobs:
 
     steps:
       # ─────────────────────────────────────────
-      # 1. CHECKOUT
+      # 1. CHECKOUT repo ini (tempat YML nyangkut)
       # ─────────────────────────────────────────
-      - name: Checkout repo
+      - name: Checkout this repo
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       # ─────────────────────────────────────────
-      # 2. SETUP JDK
+      # 2. CLONE source Firewall sementara
+      #    → masuk ke folder firewall-src/
+      #    → dihapus otomatis setelah job selesai
+      # ─────────────────────────────────────────
+      - name: Clone Datura Firewall source (temporary)
+        run: |
+          git clone --depth=1 --branch 11 \
+            https://github.com/ProjectSakura/packages_apps_Firewall.git \
+            firewall-src
+          echo "✅ Cloned. Contents:"
+          ls firewall-src/
+
+      # ─────────────────────────────────────────
+      # 3. SETUP JDK 17
       # ─────────────────────────────────────────
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -44,29 +55,30 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ hashFiles('firewall-src/**/*.gradle', 'firewall-src/**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
       # ─────────────────────────────────────────
-      # 3. FIX jcenter() → mavenCentral()
-      #    (jcenter sudah mati sejak 2022)
+      # 4. FIX jcenter() → mavenCentral()
       # ─────────────────────────────────────────
       - name: Fix deprecated jcenter → mavenCentral
+        working-directory: firewall-src
         run: |
           sed -i 's/jcenter()/mavenCentral()/g' build.gradle
-          # Fix app/build.gradle juga kalau ada
           if [ -f app/build.gradle ]; then
             sed -i 's/jcenter()/mavenCentral()/g' app/build.gradle
           fi
           echo "✅ jcenter replaced with mavenCentral"
 
       # ─────────────────────────────────────────
-      # 4. BUILD APK
+      # 5. BUILD APK
       # ─────────────────────────────────────────
       - name: Grant execute permission for gradlew
+        working-directory: firewall-src
         run: chmod +x gradlew
 
       - name: Build APK (${{ github.event.inputs.build_type }})
+        working-directory: firewall-src
         run: |
           if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
             ./gradlew assembleRelease
@@ -76,23 +88,24 @@ jobs:
 
       - name: Locate built APK
         id: find_apk
+        working-directory: firewall-src
         run: |
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
           if [ -z "$APK" ]; then
             echo "❌ APK not found! Build failed."
             exit 1
           fi
-          echo "apk_path=$APK" >> $GITHUB_OUTPUT
-          echo "✅ APK found: $APK"
+          FULL_PATH="$GITHUB_WORKSPACE/firewall-src/$APK"
+          echo "apk_path=$FULL_PATH" >> $GITHUB_OUTPUT
+          echo "✅ APK found: $FULL_PATH"
 
       # ─────────────────────────────────────────
-      # 5. BUAT STRUKTUR MAGISK MODULE
+      # 6. BUAT STRUKTUR MAGISK MODULE
       # ─────────────────────────────────────────
       - name: Create Magisk module structure
         run: |
           MODULE_DIR="magisk-module"
 
-          # Buat folder structure
           mkdir -p $MODULE_DIR/META-INF/com/google/android
           mkdir -p $MODULE_DIR/system/priv-app/Firewall
           mkdir -p $MODULE_DIR/system/etc/permissions
@@ -107,28 +120,20 @@ jobs:
           description=CalyxOS Datura Firewall - per-app network control without VPN
           EOF
 
-          # ── updater-script (wajib ada tapi isinya cuma marker) ──
+          # ── updater-script ──
           echo "#MAGISK" > $MODULE_DIR/META-INF/com/google/android/updater-script
 
-          # ── update-binary (installer script) ──
+          # ── update-binary ──
           cat > $MODULE_DIR/META-INF/com/google/android/update-binary << 'INSTALLER'
           #!/sbin/sh
-
           SKIPUNZIP=1
-
-          # Extract files
           unzip -o "$ZIPFILE" 'system/*' -d "$MODPATH" >&2
           unzip -o "$ZIPFILE" 'module.prop' -d "$MODPATH" >&2
-
-          # Set permissions
-          # priv-app: folder 0755, APK 0644, owner root:root
           set_perm_recursive "$MODPATH/system/priv-app" root root 0755 0644
-          # permissions XML: 0644
           set_perm_recursive "$MODPATH/system/etc/permissions" root root 0755 0644
-
           ui_print "- Datura Firewall installed as priv-app"
           ui_print "- Network policy permissions granted"
-          ui_print "- Reboot required to take effect"
+          ui_print "- Reboot required!"
           INSTALLER
 
           chmod +x $MODULE_DIR/META-INF/com/google/android/update-binary
@@ -148,19 +153,19 @@ jobs:
           </permissions>
           EOF
 
-          echo "✅ Magisk module structure created"
+          echo "✅ Module structure ready:"
           find $MODULE_DIR -type f
 
       # ─────────────────────────────────────────
-      # 6. COPY APK KE MODULE
+      # 7. COPY APK KE MODULE
       # ─────────────────────────────────────────
       - name: Copy APK into module
         run: |
           cp "${{ steps.find_apk.outputs.apk_path }}" magisk-module/system/priv-app/Firewall/Firewall.apk
-          echo "✅ APK copied: $(du -sh magisk-module/system/priv-app/Firewall/Firewall.apk)"
+          echo "✅ APK size: $(du -sh magisk-module/system/priv-app/Firewall/Firewall.apk)"
 
       # ─────────────────────────────────────────
-      # 7. ZIP JADI MAGISK MODULE
+      # 8. ZIP JADI MAGISK MODULE
       # ─────────────────────────────────────────
       - name: Package as Magisk module zip
         run: |
@@ -173,19 +178,19 @@ jobs:
           cd ..
 
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
-          echo "✅ Magisk module zipped: $ZIP_NAME ($(du -sh $ZIP_NAME | cut -f1))"
+          echo "✅ Zipped: $ZIP_NAME ($(du -sh $ZIP_NAME | cut -f1))"
 
       # ─────────────────────────────────────────
-      # 8. UPLOAD ARTIFACT — APK + MODULE ZIP
+      # 9. UPLOAD ARTIFACTS
       # ─────────────────────────────────────────
-      - name: Upload Magisk Module
+      - name: Upload Magisk Module ZIP
         uses: actions/upload-artifact@v4
         with:
           name: DaturaFirewall-${{ github.event.inputs.module_version }}-magisk-module
           path: DaturaFirewall-*.zip
           retention-days: 14
 
-      - name: Upload raw APK (opsional)
+      - name: Upload raw APK
         uses: actions/upload-artifact@v4
         with:
           name: DaturaFirewall-${{ github.event.inputs.module_version }}-apk-only
@@ -193,7 +198,7 @@ jobs:
           retention-days: 7
 
       # ─────────────────────────────────────────
-      # 9. SUMMARY
+      # 10. SUMMARY
       # ─────────────────────────────────────────
       - name: Print build summary
         run: |
@@ -202,8 +207,7 @@ jobs:
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Module Version | ${{ github.event.inputs.module_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build Type | ${{ github.event.inputs.build_type }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| APK | \`${{ steps.find_apk.outputs.apk_path }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Magisk ZIP | \`${{ env.zip_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Run # | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Flash via Magisk Manager → Install from storage → pilih ZIP → Reboot**" >> $GITHUB_STEP_SUMMARY
+          echo "**Flash: Magisk Manager → Install → pilih ZIP → Reboot**" >> $GITHUB_STEP_SUMMARY
