@@ -83,16 +83,21 @@ jobs:
           sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:7.4.2/g" build.gradle
           echo "✅ AGP upgraded to 7.4.2"
 
+
           # Upgrade Gradle wrapper ke 7.6.4
+          WRAPPER_PROPS="gradle/wrapper/gradle-wrapper.properties"
           sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-bin.zip|g' \
-            gradle/wrapper/gradle-wrapper.properties
-          echo "✅ Gradle wrapper upgraded to 7.6.4"
+            $WRAPPER_PROPS
+          # Hapus distributionSha256Sum — checksum lama bikin mismatch error
+          sed -i '/distributionSha256Sum/d' $WRAPPER_PROPS
+          echo "✅ Gradle wrapper 7.6.4, stale checksum removed"
 
           # Verify
           echo "--- build.gradle ---"
           cat build.gradle
           echo "--- gradle-wrapper.properties ---"
-          cat gradle/wrapper/gradle-wrapper.properties
+          cat $WRAPPER_PROPS
+
 
       # ─────────────────────────────────────────
       # 6. BUILD APK
