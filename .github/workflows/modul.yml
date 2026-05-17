@@ -99,8 +99,32 @@ jobs:
           cat $WRAPPER_PROPS
 
 
+
       # ─────────────────────────────────────────
-      # 6. BUILD APK
+      # 6. PATCH hidden API → public API
+      #    getInstalledApplicationsAsUser() di-blacklist Samsung
+      #    → ganti ke getInstalledApplications() yang public
+      # ─────────────────────────────────────────
+      - name: Patch hidden API for One UI compatibility
+        working-directory: firewall-src
+        run: |
+          MAIN="app/src/main/java/org/calyxos/datura/MainActivity.java"
+          echo "--- Before patch (line 95-105) ---"
+          sed -n '95,105p' $MAIN
+
+          # Ganti import hidden class kalau ada
+          sed -i 's/import android.content.pm.PackageManager.MATCH_UNINSTALLED_PACKAGES;//g' $MAIN
+
+          # Ganti getInstalledApplicationsAsUser(flags, userId)
+          # → getInstalledApplications(flags) — public API, kompatibel semua ROM
+          sed -i 's/getInstalledApplicationsAsUser(\([^,]*\),\s*[0-9]*)/getInstalledApplications()/g' $MAIN
+
+          echo "--- After patch ---"
+          sed -n '95,105p' $MAIN
+          echo "✅ Hidden API patched"
+
+      # ─────────────────────────────────────────
+      # 7. BUILD APK
       # ─────────────────────────────────────────
       - name: Grant execute permission for gradlew
         working-directory: firewall-src
@@ -129,7 +153,7 @@ jobs:
           echo "✅ APK found: $FULL_PATH"
 
       # ─────────────────────────────────────────
-      # 7. BUAT STRUKTUR MAGISK MODULE
+      # 8. BUAT STRUKTUR MAGISK MODULE
       # ─────────────────────────────────────────
       - name: Create Magisk module structure
         run: |
@@ -186,7 +210,7 @@ jobs:
           find $MODULE_DIR -type f
 
       # ─────────────────────────────────────────
-      # 8. COPY APK KE MODULE
+      # 9. COPY APK KE MODULE
       # ─────────────────────────────────────────
       - name: Copy APK into module
         run: |
@@ -194,7 +218,7 @@ jobs:
           echo "✅ APK size: $(du -sh magisk-module/system/priv-app/Firewall/Firewall.apk)"
 
       # ─────────────────────────────────────────
-      # 9. ZIP JADI MAGISK MODULE
+      # 10. ZIP JADI MAGISK MODULE
       # ─────────────────────────────────────────
       - name: Package as Magisk module zip
         run: |
@@ -210,7 +234,7 @@ jobs:
           echo "✅ Zipped: $ZIP_NAME ($(du -sh $ZIP_NAME | cut -f1))"
 
       # ─────────────────────────────────────────
-      # 10. UPLOAD ARTIFACTS
+      # 11. UPLOAD ARTIFACTS
       # ─────────────────────────────────────────
       - name: Upload Magisk Module ZIP
         uses: actions/upload-artifact@v4
@@ -227,7 +251,7 @@ jobs:
           retention-days: 7
 
       # ─────────────────────────────────────────
-      # 11. SUMMARY
+      # 12. SUMMARY
       # ─────────────────────────────────────────
       - name: Print build summary
         run: |
