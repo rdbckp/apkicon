@@ -1,4 +1,4 @@
-name: Build Datura Firewall → Magisk Module
+name: Build Datura Firewall - Magisk Module
 
 on:
   workflow_dispatch:
@@ -21,28 +21,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 1. CHECKOUT repo ini (tempat YML)
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Checkout this repo
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 2. CLONE source Firewall sementara
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Clone Datura Firewall source (temporary)
         run: |
           git clone --depth=1 --branch 11 \
             https://github.com/ProjectSakura/packages_apps_Firewall.git \
             firewall-src
-          echo "✅ Cloned. Contents:"
+          echo "[OK] Cloned. Contents:"
           ls firewall-src/
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 3. SETUP JDK 11
-      #    AGP 4.1.1 pakai Gradle 6.x → butuh JDK 11
+      #    AGP 4.1.1 pakai Gradle 6.x -> butuh JDK 11
       #    JDK 17 incompatible dengan Gradle 6.x
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
@@ -58,39 +58,39 @@ jobs:
           key: gradle-${{ hashFiles('firewall-src/**/*.gradle', 'firewall-src/**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      # ─────────────────────────────────────────
-      # 4. FIX semua jcenter() → mavenCentral()
+      # -----------------------------------------
+      # 4. FIX semua jcenter() -> mavenCentral()
       #    di build.gradle, app/build.gradle,
       #    DAN settings.gradle
-      # ─────────────────────────────────────────
-      - name: Fix deprecated jcenter → mavenCentral
+      # -----------------------------------------
+      - name: Fix deprecated jcenter -> mavenCentral
         working-directory: firewall-src
         run: |
           # Fix semua file gradle sekaligus
           find . -name "*.gradle" | xargs sed -i 's/jcenter()/mavenCentral()/g'
-          echo "✅ Fixed files:"
+          echo "[OK] Fixed files:"
           grep -rl "mavenCentral" . --include="*.gradle" | grep -v ".gradle/"
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 5. UPGRADE AGP + Gradle wrapper
-      #    AGP 4.1.1 → 7.4.2 (stable, JDK 11 ok)
-      #    Gradle wrapper 6.x → 7.6.4
-      # ─────────────────────────────────────────
+      #    AGP 4.1.1 -> 7.4.2 (stable, JDK 11 ok)
+      #    Gradle wrapper 6.x -> 7.6.4
+      # -----------------------------------------
       - name: Upgrade AGP and Gradle wrapper
         working-directory: firewall-src
         run: |
           # Upgrade AGP di build.gradle
           sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:7.4.2/g" build.gradle
-          echo "✅ AGP upgraded to 7.4.2"
+          echo "[OK] AGP upgraded to 7.4.2"
 
 
           # Upgrade Gradle wrapper ke 7.6.4
           WRAPPER_PROPS="gradle/wrapper/gradle-wrapper.properties"
           sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-bin.zip|g' \
             $WRAPPER_PROPS
-          # Hapus distributionSha256Sum — checksum lama bikin mismatch error
+          # Hapus distributionSha256Sum - checksum lama bikin mismatch error
           sed -i '/distributionSha256Sum/d' $WRAPPER_PROPS
-          echo "✅ Gradle wrapper 7.6.4, stale checksum removed"
+          echo "[OK] Gradle wrapper 7.6.4, stale checksum removed"
 
           # Verify
           echo "--- build.gradle ---"
@@ -100,11 +100,11 @@ jobs:
 
 
 
-      # ─────────────────────────────────────────
-      # 6. PATCH hidden API → public API
+      # -----------------------------------------
+      # 6. PATCH hidden API -> public API
       #    getInstalledApplicationsAsUser() di-blacklist Samsung
-      #    → ganti ke getInstalledApplications() yang public
-      # ─────────────────────────────────────────
+      #    -> ganti ke getInstalledApplications() yang public
+      # -----------------------------------------
       - name: Patch hidden API for One UI compatibility
         working-directory: firewall-src
         run: |
@@ -116,16 +116,16 @@ jobs:
           sed -i 's/import android.content.pm.PackageManager.MATCH_UNINSTALLED_PACKAGES;//g' $MAIN
 
           # Ganti getInstalledApplicationsAsUser(flags, userId)
-          # → getInstalledApplications(flags) — public API, kompatibel semua ROM
-          sed -i 's/getInstalledApplicationsAsUser(\([^,]*\),\s*[0-9]*)/getInstalledApplications()/g' $MAIN
+          # -> getInstalledApplications(flags) - public API, kompatibel semua ROM
+          sed -i 's/getInstalledApplicationsAsUser(\([^,]*\),\s*[0-9]*)/getInstalledApplications()/g' $MAIN
 
           echo "--- After patch ---"
           sed -n '95,105p' $MAIN
-          echo "✅ Hidden API patched"
+          echo "[OK] Hidden API patched"
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 7. BUILD APK
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Grant execute permission for gradlew
         working-directory: firewall-src
         run: chmod +x gradlew
@@ -145,16 +145,16 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
           if [ -z "$APK" ]; then
-            echo "❌ APK not found! Build failed."
+            echo "[FAIL] APK not found! Build failed."
             exit 1
           fi
           FULL_PATH="$GITHUB_WORKSPACE/firewall-src/$APK"
           echo "apk_path=$FULL_PATH" >> $GITHUB_OUTPUT
-          echo "✅ APK found: $FULL_PATH"
+          echo "[OK] APK found: $FULL_PATH"
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 8. BUAT STRUKTUR MAGISK MODULE
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Create Magisk module structure
         run: |
           MODULE_DIR="magisk-module"
@@ -163,7 +163,7 @@ jobs:
           mkdir -p $MODULE_DIR/system/priv-app/Firewall
           mkdir -p $MODULE_DIR/system/etc/permissions
 
-          # ── module.prop ──
+          # -- module.prop --
           cat > $MODULE_DIR/module.prop << EOF
           id=datura-firewall
           name=Datura Firewall (CalyxOS Port)
@@ -173,10 +173,10 @@ jobs:
           description=CalyxOS Datura Firewall - per-app network control without VPN
           EOF
 
-          # ── updater-script ──
+          # -- updater-script --
           echo "#MAGISK" > $MODULE_DIR/META-INF/com/google/android/updater-script
 
-          # ── update-binary ──
+          # -- update-binary --
           cat > $MODULE_DIR/META-INF/com/google/android/update-binary << 'INSTALLER'
           #!/sbin/sh
           SKIPUNZIP=1
@@ -191,7 +191,7 @@ jobs:
 
           chmod +x $MODULE_DIR/META-INF/com/google/android/update-binary
 
-          # ── privapp-permissions XML ──
+          # -- privapp-permissions XML --
           cat > $MODULE_DIR/system/etc/permissions/privapp-permissions-Firewall.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <permissions>
@@ -206,20 +206,20 @@ jobs:
           </permissions>
           EOF
 
-          echo "✅ Module structure ready:"
+          echo "[OK] Module structure ready:"
           find $MODULE_DIR -type f
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 9. COPY APK KE MODULE
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Copy APK into module
         run: |
           cp "${{ steps.find_apk.outputs.apk_path }}" magisk-module/system/priv-app/Firewall/Firewall.apk
-          echo "✅ APK size: $(du -sh magisk-module/system/priv-app/Firewall/Firewall.apk)"
+          echo "[OK] APK size: $(du -sh magisk-module/system/priv-app/Firewall/Firewall.apk)"
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 10. ZIP JADI MAGISK MODULE
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Package as Magisk module zip
         run: |
           VERSION="${{ github.event.inputs.module_version }}"
@@ -231,11 +231,11 @@ jobs:
           cd ..
 
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
-          echo "✅ Zipped: $ZIP_NAME ($(du -sh $ZIP_NAME | cut -f1))"
+          echo "[OK] Zipped: $ZIP_NAME ($(du -sh $ZIP_NAME | cut -f1))"
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 11. UPLOAD ARTIFACTS
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Upload Magisk Module ZIP
         uses: actions/upload-artifact@v4
         with:
@@ -250,12 +250,12 @@ jobs:
           path: ${{ steps.find_apk.outputs.apk_path }}
           retention-days: 7
 
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       # 12. SUMMARY
-      # ─────────────────────────────────────────
+      # -----------------------------------------
       - name: Print build summary
         run: |
-          echo "### ✅ Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### [OK] Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Module Version | ${{ github.event.inputs.module_version }} |" >> $GITHUB_STEP_SUMMARY
@@ -263,4 +263,4 @@ jobs:
           echo "| Magisk ZIP | \`${{ env.zip_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Run # | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Flash: Magisk Manager → Install → pilih ZIP → Reboot**" >> $GITHUB_STEP_SUMMARY
+          echo "**Flash: Magisk Manager -> Install -> pilih ZIP -> Reboot**" >> $GITHUB_STEP_SUMMARY
